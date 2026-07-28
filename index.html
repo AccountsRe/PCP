@@ -423,12 +423,12 @@ async function submitReq(){
     days = Math.round((hours/hpd())*100)/100;
   }
   if(cat==='unpaid'){
-    const ptoLeft=allowanceFor(name,'pto')-usageFor(name,'pto','approved');
-    const sickLeft=allowanceFor(name,'sick')-usageFor(name,'sick','approved');
+    const ptoLeft=allowanceFor(name,'pto')-usageFor(name,'pto','approved')*hpd();
+    const sickLeft=allowanceFor(name,'sick')-usageFor(name,'sick','approved')*hpd();
     if(ptoLeft>0 || sickLeft>0){
       const msg=`Heads up — ${name} still has balance left:\n`+
-        (ptoLeft>0?`  • PTO: ${fmtNum(ptoLeft)} day(s)\n`:'')+
-        (sickLeft>0?`  • Sick: ${fmtNum(sickLeft)} day(s)\n`:'')+
+        (ptoLeft>0?`  • PTO: ${fmtNum(ptoLeft)}h\n`:'')+
+        (sickLeft>0?`  • Sick: ${fmtNum(sickLeft)}h\n`:'')+
         `\nUnpaid does not use any balance. Submit as Unpaid anyway?\n\n`+
         `Aviso — a ${name} le queda saldo`+
         (ptoLeft>0?` · PTO: ${fmtNum(ptoLeft)}`:'')+(sickLeft>0?` · Enfermedad: ${fmtNum(sickLeft)}`:'')+
@@ -515,7 +515,7 @@ function requestRowsForExport(){
   return filteredRequests().slice().sort((a,b)=> new Date(a.createdAt)-new Date(b.createdAt)).map(r=>({
     'Name':r.name,'Category':CAT[r.cat].label,'Detail':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration':DUR[r.dur].en,'Status':STATUS[r.status].en,
     'Date':fmtDate(r.start),'End':(r.dur==='full'?fmtDate(r.end):''),'Start time':((r.dur==='hourly'||r.dur==='half')?fmt12(r.startTime):''),
-    'Hours':(r.dur==='hourly'?r.hours:''),'Days':r.days,'Reason':r.reason||'',
+    'Hours':fmtNum((+r.days||0)*hpd()),'Reason':r.reason||'',
     'Submitted':fmtDT(r.createdAt),'By':r.by||'','Reviewed by':r.reviewedBy||'','Edited by':r.editedBy||''
   }));
 }
@@ -528,9 +528,9 @@ function exportRequestsCSV(){
 function balanceRowsForExport(){
   return allEmployeeNames().map(n=>({
     'Name':n,'Year':curYear(),
-    'PTO allowance':allowanceFor(n,'pto'),'PTO used':usageFor(n,'pto','approved'),'PTO pending':usageFor(n,'pto','pending'),'PTO remaining':allowanceFor(n,'pto')-usageFor(n,'pto','approved'),
-    'Sick allowance':allowanceFor(n,'sick'),'Sick used':usageFor(n,'sick','approved'),'Sick pending':usageFor(n,'sick','pending'),'Sick remaining':allowanceFor(n,'sick')-usageFor(n,'sick','approved'),
-    'Unpaid used':usageFor(n,'unpaid','approved')
+    'PTO allowance (h)':allowanceFor(n,'pto'),'PTO used (h)':fmtNum(usageFor(n,'pto','approved')*hpd()),'PTO pending (h)':fmtNum(usageFor(n,'pto','pending')*hpd()),'PTO remaining (h)':fmtNum(allowanceFor(n,'pto')-usageFor(n,'pto','approved')*hpd()),
+    'Sick allowance (h)':allowanceFor(n,'sick'),'Sick used (h)':fmtNum(usageFor(n,'sick','approved')*hpd()),'Sick pending (h)':fmtNum(usageFor(n,'sick','pending')*hpd()),'Sick remaining (h)':fmtNum(allowanceFor(n,'sick')-usageFor(n,'sick','approved')*hpd()),
+    'Unpaid used (h)':fmtNum(usageFor(n,'unpaid','approved')*hpd())
   }));
 }
 function exportBalancesCSV(){
@@ -668,7 +668,7 @@ function exportExcel(){
     'Name / Nombre':r.name,'Category / Categoría':`${CAT[r.cat].label} (${CAT[r.cat].es})`,'Detail / Detalle':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration / Duración':DUR[r.dur].en,
     'Status / Estado':STATUS[r.status].en,'Date / Fecha':fmtDate(r.start),'End / Fin':(r.dur==='full'?fmtDate(r.end):''),
     'Start time / Hora':((r.dur==='hourly'||r.dur==='half')?fmt12(r.startTime):''),'Hours / Horas':(r.dur==='hourly'?r.hours:''),
-    'Days / Días':r.days,'Reason / Motivo':r.reason||'','Submitted / Enviado':fmtDT(r.createdAt),'By / Por':r.by||'','Reviewed by / Revisado':r.reviewedBy||''
+    'Hours':fmtNum((+r.days||0)*hpd()),'Reason / Motivo':r.reason||'','Submitted / Enviado':fmtDT(r.createdAt),'By / Por':r.by||'','Reviewed by / Revisado':r.reviewedBy||''
   }));
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.json_to_sheet(rows);
@@ -677,9 +677,9 @@ function exportExcel(){
   const bnames=allEmployeeNames();
   if(bnames.length){
     const brows=bnames.map(n=>({ 'Name / Nombre':n,
-      'PTO allowance':allowanceFor(n,'pto'),'PTO used':usageFor(n,'pto','approved'),'PTO pending':usageFor(n,'pto','pending'),'PTO remaining':allowanceFor(n,'pto')-usageFor(n,'pto','approved'),
-      'Sick allowance':allowanceFor(n,'sick'),'Sick used':usageFor(n,'sick','approved'),'Sick pending':usageFor(n,'sick','pending'),'Sick remaining':allowanceFor(n,'sick')-usageFor(n,'sick','approved'),
-      'Unpaid used':usageFor(n,'unpaid','approved') }));
+      'PTO allowance (h)':allowanceFor(n,'pto'),'PTO used (h)':fmtNum(usageFor(n,'pto','approved')*hpd()),'PTO pending (h)':fmtNum(usageFor(n,'pto','pending')*hpd()),'PTO remaining (h)':fmtNum(allowanceFor(n,'pto')-usageFor(n,'pto','approved')*hpd()),
+      'Sick allowance (h)':allowanceFor(n,'sick'),'Sick used (h)':fmtNum(usageFor(n,'sick','approved')*hpd()),'Sick pending (h)':fmtNum(usageFor(n,'sick','pending')*hpd()),'Sick remaining (h)':fmtNum(allowanceFor(n,'sick')-usageFor(n,'sick','approved')*hpd()),
+      'Unpaid used (h)':fmtNum(usageFor(n,'unpaid','approved')*hpd()) }));
     const bws=XLSX.utils.json_to_sheet(brows);
     bws['!cols']=[{wch:16},{wch:13},{wch:10},{wch:11},{wch:13},{wch:13},{wch:10},{wch:11},{wch:13},{wch:12}];
     XLSX.utils.book_append_sheet(wb,bws,`Balances ${curYear()}`);
@@ -828,7 +828,7 @@ function reqDetailModal(){
     [bl('Category','Categoría'), catB.label],
     [bl('Detail','Detalle'), (detB?detB.label:catB.label)],
     [bl('When','Cuándo'), when],
-    [bl('Amount','Cantidad'), `${fmtNum(r.days)} ${bl('day(s)','día(s)')}`],
+    [bl('Amount','Cantidad'), `${fmtNum(r.days*hpd())}h`],
     r.reason?[bl('Reason','Motivo'), esc(r.reason)]:null,
     [bl('Submitted','Enviado'), fmtDT(r.createdAt)+(r.by?` · ${esc(r.by)}`:'')],
     r.reviewedBy?[bl('Reviewed by','Revisado'), `${esc(r.reviewedBy)}`+(r.reviewedAt?` · ${fmtDT(r.reviewedAt)}`:'')]:null,
@@ -920,10 +920,10 @@ function viewRequests(isAdmin){
     const el=document.getElementById('rName');
     const nm=((el?el.value:'')||state.user||'').trim();
     if(nm){
-      const pL=allowanceFor(nm,'pto')-usageFor(nm,'pto','approved');
-      const sL=allowanceFor(nm,'sick')-usageFor(nm,'sick','approved');
+      const pL=allowanceFor(nm,'pto')-usageFor(nm,'pto','approved')*hpd();
+      const sL=allowanceFor(nm,'sick')-usageFor(nm,'sick','approved')*hpd();
       if(pL>0||sL>0){
-        const parts=[pL>0?`PTO ${fmtNum(pL)}`:null, sL>0?`Sick ${fmtNum(sL)}`:null].filter(Boolean).join(' · ');
+        const parts=[pL>0?`PTO ${fmtNum(pL)}h`:null, sL>0?`Sick ${fmtNum(sL)}h`:null].filter(Boolean).join(' · ');
         unpaidWarn=`<div class="warnbox">${IC.info}<div><b>${esc(nm)}</b> still has balance left (${parts}). Unpaid uses no balance — use it only if PTO/Sick can't cover this.<span class="es">A ${esc(nm)} aún le queda saldo. Sin goce no usa saldo; úsalo solo si PTO/Enfermedad no alcanza.</span></div></div>`;
       }
     }
@@ -965,9 +965,9 @@ function viewRequests(isAdmin){
     <div class="stats">
       <div class="stat click ${state.quick===null?'':''}" onclick="toggleQuick(null)"><div class="n">${list.length}</div><div class="l">Shown requests${es('Solicitudes mostradas')}</div></div>
       <div class="stat warn click ${state.quick==='pending'?'on':''}" onclick="toggleQuick('pending')"><div class="n">${pending}</div><div class="l">Pending${es('Pendientes')}</div></div>
-      <div class="stat pto click ${state.quick==='pto'?'on':''}" onclick="toggleQuick('pto')"><div class="n">${fmtNum(ptoDays)}</div><div class="l">PTO days${es('Días de vacaciones')}</div></div>
-      <div class="stat sick click ${state.quick==='sick'?'on':''}" onclick="toggleQuick('sick')"><div class="n">${fmtNum(sickDays)}</div><div class="l">Sick days${es('Días enfermedad')}</div></div>
-      <div class="stat unpaid click ${state.quick==='unpaid'?'on':''}" onclick="toggleQuick('unpaid')"><div class="n">${fmtNum(unpaidDays)}</div><div class="l">Unpaid days${es('Días sin goce')}</div></div>
+      <div class="stat pto click ${state.quick==='pto'?'on':''}" onclick="toggleQuick('pto')"><div class="n">${fmtNum(ptoDays*hpd())}h</div><div class="l">PTO hours${es('Horas de vacaciones')}</div></div>
+      <div class="stat sick click ${state.quick==='sick'?'on':''}" onclick="toggleQuick('sick')"><div class="n">${fmtNum(sickDays*hpd())}h</div><div class="l">Sick hours${es('Horas enfermedad')}</div></div>
+      <div class="stat unpaid click ${state.quick==='unpaid'?'on':''}" onclick="toggleQuick('unpaid')"><div class="n">${fmtNum(unpaidDays*hpd())}h</div><div class="l">Unpaid hours${es('Horas sin goce')}</div></div>
     </div>
 
     <div class="card pad">
@@ -997,7 +997,7 @@ function viewRequests(isAdmin){
       ${unpaidWarn}
       <div class="row-actions">
         <button class="submit" onclick="submitReq()">Add request<span class="b-es">Agregar solicitud</span></button>
-        <span style="font-size:12px;color:var(--soft);line-height:1.4">${(()=>{ if(d==='hourly') return `${hpd()}h = 1 day · ${bl('starts as Pending','queda Pendiente')}`; if(d==='half') return `0.5 day · ${bl('starts as Pending','queda Pendiente')}`; const se=document.getElementById('rStart'), ee=document.getElementById('rEnd'); const bd=(se&&ee&&se.value&&ee.value)?businessDays(se.value,ee.value):null; return `${bd!=null?`<b>${bd} business day${bd===1?'':'s'}</b> (weekends excluded) · `:''}${bl('starts as Pending','queda Pendiente')}`; })()}</span>
+        <span style="font-size:12px;color:var(--soft);line-height:1.4">${(()=>{ if(d==='hourly') return `${bl('Counts as the hours you enter','Cuenta las horas ingresadas')} · ${bl('starts as Pending','queda Pendiente')}`; if(d==='half') return `${fmtNum(hpd()/2)}h (half day) · ${bl('starts as Pending','queda Pendiente')}`; const se=document.getElementById('rStart'), ee=document.getElementById('rEnd'); const bd=(se&&ee&&se.value&&ee.value)?businessDays(se.value,ee.value):null; return `${bd!=null?`<b>${bd} × ${fmtNum(hpd())}h = ${fmtNum(bd*hpd())}h</b> (weekends excluded) · `:''}${bl('starts as Pending','queda Pendiente')}`; })()}</span>
       </div>
     </div>
 
@@ -1024,18 +1024,19 @@ function viewRequests(isAdmin){
 }
 
 function balanceCard(name){
-  const pA=allowanceFor(name,'pto'), pU=usageFor(name,'pto','approved'), pP=usageFor(name,'pto','pending'), pR=pA-pU;
-  const sA=allowanceFor(name,'sick'), sU=usageFor(name,'sick','approved'), sP=usageFor(name,'sick','pending'), sR=sA-sU;
+  const H=hpd();
+  const pA=allowanceFor(name,'pto'), pU=usageFor(name,'pto','approved')*H, pP=usageFor(name,'pto','pending')*H, pR=pA-pU;
+  const sA=allowanceFor(name,'sick'), sU=usageFor(name,'sick','approved')*H, sP=usageFor(name,'sick','pending')*H, sR=sA-sU;
   const pct=(u,a)=> a>0?Math.min(100,Math.round(u/a*100)):0;
   return `<div class="balwrap">
     <div class="bal pto"><div class="cap">PTO · Vacaciones · ${curYear()}</div>
-      <div class="big">${fmtNum(pR)}<small> / ${fmtNum(pA)} left · restantes</small></div>
+      <div class="big">${fmtNum(pR)}h<small> / ${fmtNum(pA)}h left · restantes</small></div>
       <div class="bar"><span style="width:${pct(pU,pA)}%"></span></div>
-      <div class="sub2">Used ${fmtNum(pU)} · pending ${fmtNum(pP)}<br><span class="es" style="margin:0">Usados ${fmtNum(pU)} · pendientes ${fmtNum(pP)}</span></div></div>
+      <div class="sub2">Used ${fmtNum(pU)}h · pending ${fmtNum(pP)}h<br><span class="es" style="margin:0">Usados ${fmtNum(pU)}h · pendientes ${fmtNum(pP)}h</span></div></div>
     <div class="bal sick"><div class="cap">Sick · Enfermedad · ${curYear()}</div>
-      <div class="big">${fmtNum(sR)}<small> / ${fmtNum(sA)} left · restantes</small></div>
+      <div class="big">${fmtNum(sR)}h<small> / ${fmtNum(sA)}h left · restantes</small></div>
       <div class="bar"><span style="width:${pct(sU,sA)}%"></span></div>
-      <div class="sub2">Used ${fmtNum(sU)} · pending ${fmtNum(sP)}<br><span class="es" style="margin:0">Usados ${fmtNum(sU)} · pendientes ${fmtNum(sP)}</span></div></div>
+      <div class="sub2">Used ${fmtNum(sU)}h · pending ${fmtNum(sP)}h<br><span class="es" style="margin:0">Usados ${fmtNum(sU)}h · pendientes ${fmtNum(sP)}h</span></div></div>
   </div>`;
 }
 
@@ -1153,14 +1154,14 @@ function reqRow(r,isAdmin){
   let dateLine, amount;
   if(r.dur==='hourly'){
     dateLine = `${fmtDate(r.start)} · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime, r.hours))}`;
-    amount = `${r.hours}h (${fmtNum(r.days)} day)`;
+    amount = `${fmtNum(r.days*hpd())}h`;
   } else if(r.dur==='half'){
     const hh = r.startTime ? ` · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime, hpd()/2))}` : '';
     dateLine = `${fmtDate(r.start)} · Half day${hh}`;
-    amount = `${fmtNum(r.days)} day`;
+    amount = `${fmtNum(r.days*hpd())}h`;
   } else {
     dateLine = r.start===r.end?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`;
-    amount = `${fmtNum(r.days)} day${(+r.days)===1?'':'s'}`;
+    amount = `${fmtNum(r.days*hpd())}h`;
   }
   const reviewed = r.reviewedBy ? ` · ${st.en} by ${esc(r.reviewedBy)}` : '';
   const edited = r.editedBy ? ` · edited by ${esc(r.editedBy)}` : '';
@@ -1188,20 +1189,21 @@ function reqRow(r,isAdmin){
 function viewBalances(){
   _names=allEmployeeNames();
   const rows=_names.map((n,i)=>{
-    const pA=allowanceFor(n,'pto'), pU=usageFor(n,'pto','approved'), pR=pA-pU;
-    const sA=allowanceFor(n,'sick'), sU=usageFor(n,'sick','approved'), sR=sA-sU;
-    const uU=usageFor(n,'unpaid','approved');
+    const H=hpd();
+    const pA=allowanceFor(n,'pto'), pU=usageFor(n,'pto','approved')*H, pR=pA-pU;
+    const sA=allowanceFor(n,'sick'), sU=usageFor(n,'sick','approved')*H, sR=sA-sU;
+    const uU=usageFor(n,'unpaid','approved')*H;
     const ov=state.employees[n]||{};
     const inRoster=Object.prototype.hasOwnProperty.call(state.employees,n);
     const isActive=inRoster && ov.active!==false;
     const pv=ov.pto_allowance!=null?ov.pto_allowance:'', sv=ov.sick_allowance!=null?ov.sick_allowance:'';
     return `<tr${isActive?'':' style="opacity:.6"'}>
       <td class="name">${esc(n)}${!inRoster?' <span style="font-size:10px;color:var(--faint)">(not on roster)</span>':(isActive?'':' <span style="font-size:10px;color:var(--danger)">(inactive)</span>')}</td>
-      <td><input type="number" min="0" step="0.5" value="${pv}" placeholder="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setAllowanceByIdx(${i},'pto',this.value)"></td>
-      <td>${fmtNum(pU)}</td><td class="${pR<=2?'rem-low':'rem-ok'}">${fmtNum(pR)}</td>
-      <td><input type="number" min="0" step="0.5" value="${sv}" placeholder="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setAllowanceByIdx(${i},'sick',this.value)"></td>
-      <td>${fmtNum(sU)}</td><td class="${sR<=1?'rem-low':'rem-ok'}">${fmtNum(sR)}</td>
-      <td>${fmtNum(uU)}</td>
+      <td><input type="number" min="0" step="1" value="${pv}" placeholder="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setAllowanceByIdx(${i},'pto',this.value)"></td>
+      <td>${fmtNum(pU)}h</td><td class="${pR<=8?'rem-low':'rem-ok'}">${fmtNum(pR)}h</td>
+      <td><input type="number" min="0" step="1" value="${sv}" placeholder="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setAllowanceByIdx(${i},'sick',this.value)"></td>
+      <td>${fmtNum(sU)}h</td><td class="${sR<=8?'rem-low':'rem-ok'}">${fmtNum(sR)}h</td>
+      <td>${fmtNum(uU)}h</td>
       <td style="text-align:center">${inRoster ? `<input type="checkbox" ${ov.can_punch?'checked':''} onchange="setPunchByIdx(${i}, this.checked)" style="width:auto;cursor:pointer">` : ''}</td>
       <td>${inRoster ? `<input type="text" value="${esc(state.codes[n]!=null?state.codes[n]:'')}" placeholder="set code" style="width:96px" onchange="setCodeByIdx(${i},this.value)">` : `<span style="color:var(--faint);font-size:11px">—</span>`}</td>
       <td style="white-space:nowrap">${!inRoster
@@ -1223,10 +1225,10 @@ function viewBalances(){
     <div class="card pad" style="margin-bottom:16px">
       <div class="sec-title"><span class="dot"></span><span>Defaults${es('Valores predeterminados')}</span></div>
       <div class="default-allow">
-        <div class="field"><label>PTO days/yr${es('Vacaciones/año')}</label><input type="number" min="0" step="0.5" value="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setDefault('pto_allowance',this.value)"></div>
-        <div class="field"><label>Sick days/yr${es('Enfermedad/año')}</label><input type="number" min="0" step="0.5" value="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setDefault('sick_allowance',this.value)"></div>
+        <div class="field"><label>PTO hours/yr${es('Vacaciones h/año')}</label><input type="number" min="0" step="1" value="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setDefault('pto_allowance',this.value)"></div>
+        <div class="field"><label>Sick hours/yr${es('Enfermedad h/año')}</label><input type="number" min="0" step="1" value="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setDefault('sick_allowance',this.value)"></div>
         <div class="field"><label>Hours / work day${es('Horas / jornada')}</label><input type="number" min="1" step="1" value="${fmtNum(hpd())}" onchange="setDefault('hours_per_day',this.value)"></div>
-        <span style="font-size:12px;color:var(--soft);line-height:1.4;max-width:230px">Hours/day converts hourly requests into days.<span class="es">Horas/jornada convierte las solicitudes por horas en días.</span></span>
+        <span style="font-size:12px;color:var(--soft);line-height:1.4;max-width:230px">All balances are in hours. Full day = this many hours.<span class="es">Todos los saldos en horas. Día completo = estas horas.</span></span>
       </div>
     </div>
     <div class="list-head"><div><h3>Balances ${curYear()}<span class="es">Saldos ${curYear()}</span></h3><div class="count">Used = approved requests dated this year</div></div>
@@ -1235,7 +1237,7 @@ function viewBalances(){
         <button class="export" onclick="exportExcel()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
       </div></div>
     <div class="card"><div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Name</th><th>PTO allow.</th><th>PTO used</th><th>PTO left</th><th>Sick allow.</th><th>Sick used</th><th>Sick left</th><th>Unpaid used</th><th>Punch</th><th>Login code</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>PTO allow. (h)</th><th>PTO used (h)</th><th>PTO left (h)</th><th>Sick allow. (h)</th><th>Sick used (h)</th><th>Sick left (h)</th><th>Unpaid used (h)</th><th>Punch</th><th>Login code</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="11" style="text-align:center;color:var(--soft);padding:30px">No employees yet — add someone above · Aún no hay empleados</td></tr>`}</tbody>
     </table></div></div>
     <div class="note">${IC.info}<div>Add your team above, then set each person's <b>Login code</b>. Employees sign in with that code — names are never listed at login. Leave allowance cells blank to use the default.${es('Agrega a tu equipo y asigna un código a cada uno. Los empleados inician sesión con ese código; los nombres no se muestran. Deja las celdas vacías para usar el valor predeterminado.')}</div></div>
