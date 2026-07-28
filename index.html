@@ -1,0 +1,1119 @@
+<!--
+  ============================================================
+  PTO & SICK LEAVE — Supabase edition (v3)
+  Real-time · Approvals · Filters · Audit log · Balances · Hourly requests
+  ============================================================
+  SETUP (once):
+  1) Create a free project at https://supabase.com
+  2) SQL Editor > paste supabase_setup.sql > Run
+  3) Authentication > Users > Add user  → add your 3 admins
+     (email + password, turn ON "Auto Confirm User")
+  4) Project Settings > API → copy Project URL + anon public key below
+  5) Host: drag this file to https://app.netlify.com/drop and share the link
+  ============================================================
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTO & Sick Leave · Vacaciones y Enfermedad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script>
+  /* ====== PASTE YOUR SUPABASE KEYS HERE ====== */
+  const SUPABASE_URL      = "https://cxebpzjvggwyekcqstpt.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4ZWJwemp2Z2d3eWVrY3FzdHB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNDE1ODcsImV4cCI6MjEwMDgxNzU4N30.lfsiZxMN3zjpVmpHdiO07Ff3DkiN--GKeZHyTxp9E10";
+  /* =========================================== */
+</script>
+
+<style>
+  :root{
+    --bg:#EEF3F4; --surface:#FFFFFF; --ink:#17242B; --soft:#5D6E76; --faint:#94A2A9;
+    --line:#DCE4E7; --line-2:#EAEFF1;
+    --pto:#2E9B8B; --pto-bg:#E3F3EF;
+    --sick:#CC7A22; --sick-bg:#FBEBD8;
+    --half:#5F6FC0; --half-bg:#E7EAF7;
+    --early:#4C86B8; --early-bg:#E1EEF6; --late:#B0568A; --late-bg:#F6E6EF;
+    --unpaid:#6B7680; --unpaid-bg:#EBEEF0;
+    --ok:#1E7D2E; --ok-bg:#E1F3E4;
+    --warnc:#8a6d1a; --warn-bg:#FBF0D5;
+    --danger:#BF473A; --danger-bg:#F8E7E4;
+    --radius:16px; --shadow:0 1px 2px rgba(23,36,43,.04),0 6px 20px rgba(23,36,43,.06);
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--bg); color:var(--ink); font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; line-height:1.5}
+  .wrap{max-width:900px; margin:0 auto; padding:26px 18px 80px}
+  h1,h2,h3{font-family:"Space Grotesk","Inter",sans-serif; margin:0}
+  button{font-family:inherit; cursor:pointer; border:none; border-radius:11px; font-weight:600; font-size:15px}
+  input,select,textarea{font-family:inherit; font-size:15px; width:100%; padding:12px 13px; border:1.5px solid var(--line); border-radius:11px; background:var(--surface); color:var(--ink); outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--pto)}
+  label{display:block; font-size:12.5px; font-weight:600; color:var(--soft); margin:0 0 6px 2px}
+  .es{display:block; font-weight:400; font-size:11px; color:var(--faint); margin-top:1px; font-family:"Inter",sans-serif}
+  .es-h{display:block; font-family:"Inter",sans-serif; font-weight:500; font-size:13.5px; color:var(--soft); margin-top:4px}
+  .b-es{display:block; font-weight:500; font-size:11px; opacity:.85; margin-top:1px}
+  .seg-es{display:block; font-weight:500; font-size:10.5px; opacity:.72; margin-top:2px}
+  .tab-es{display:block; font-size:10px; font-weight:500; opacity:.7; margin-top:1px}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; gap:12px}
+  .brand{display:flex; align-items:center; gap:11px}
+  .logo{width:40px; height:40px; border-radius:12px; background:var(--pto); display:grid; place-items:center; color:#fff; flex:none}
+  .logo svg{width:22px;height:22px}
+  .brand h1{font-size:19px; letter-spacing:-.01em; display:flex; align-items:center; gap:8px}
+  .live{width:8px;height:8px;border-radius:50%;background:#38b16f; animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(56,177,111,.5)}70%{box-shadow:0 0 0 7px rgba(56,177,111,0)}100%{box-shadow:0 0 0 0 rgba(56,177,111,0)}}
+  .brand p{margin:1px 0 0; font-size:12.5px; color:var(--soft)}
+  .who{display:flex; align-items:center; gap:10px; font-size:14px}
+  .who b{font-weight:600; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom}
+  .pill-role{font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; background:var(--half-bg); color:var(--half); text-align:center; line-height:1.2}
+  .pill-role .es{color:inherit; opacity:.7; font-size:9px; margin-top:0}
+  .pill-role.admin{background:#17242B; color:#fff}
+  .ghost{background:transparent; color:var(--soft); padding:7px 12px; border:1.5px solid var(--line); text-align:center; line-height:1.15}
+  .ghost:hover{color:var(--ink); border-color:var(--soft)}
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+  .pad{padding:20px}
+  .center{min-height:74vh; display:grid; place-items:center}
+  .authcard{width:100%; max-width:400px; text-align:center}
+  .authcard.wide{max-width:580px}
+  .authcard .logo{margin:0 auto 14px; width:52px; height:52px; border-radius:15px}
+  .authcard .logo svg{width:28px;height:28px}
+  .authcard h2{font-size:22px}
+  .authcard .sub{color:var(--soft); font-size:14px; margin:14px 0 22px}
+  .authcard .sub .es{color:var(--faint); margin-top:2px}
+  .tabs{display:flex; gap:6px; background:var(--line-2); padding:5px; border-radius:13px; margin-bottom:20px}
+  .tabs button{flex:1; padding:8px; border-radius:9px; background:transparent; color:var(--soft); font-size:14px; line-height:1.15}
+  .tabs button.on{background:var(--surface); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .field{text-align:left; margin-bottom:13px}
+  .btn-primary{width:100%; padding:12px; background:var(--pto); color:#fff; font-size:15.5px; text-align:center; line-height:1.15}
+  .btn-primary:hover{background:#268577}
+  .err{color:var(--danger); font-size:13px; margin-top:12px; min-height:18px; line-height:1.4}
+  .hint{font-size:12.5px; color:var(--soft); margin-top:16px; line-height:1.6}
+  .hint .es{color:var(--faint); margin-top:3px; margin-bottom:8px}
+  .steps{text-align:left; font-size:13.5px; color:var(--ink); line-height:1.7; padding-left:20px; margin:6px 0 0}
+  .steps li{margin-bottom:11px} .steps b{font-weight:600}
+  code{background:var(--line-2); padding:1px 6px; border-radius:6px; font-family:ui-monospace,Menlo,monospace; font-size:12.5px}
+  pre{background:#17242B; color:#E6EDF0; padding:14px 15px; border-radius:11px; font-size:11px; overflow:auto; text-align:left; line-height:1.55; font-family:ui-monospace,Menlo,monospace; margin:6px 0}
+  a{color:var(--pto); font-weight:600}
+  .warn{background:var(--sick-bg); color:#8a5211; font-size:12.5px; padding:11px 13px; border-radius:10px; margin-top:16px; line-height:1.55; text-align:left}
+  .warnbox{background:var(--warn-bg); color:#7a5f16; font-size:12.5px; font-weight:600; padding:11px 13px; border-radius:11px; margin:0 0 4px; line-height:1.5; display:flex; gap:8px; align-items:flex-start}
+  .warnbox .es{color:#a08234; font-weight:400}
+  .warnbox b{font-weight:800}
+  /* punch clock */
+  .punchcard{margin-bottom:18px}
+  .punchgrid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:4px}
+  .pbtn{border:1.5px solid var(--line); border-radius:13px; padding:14px 8px; text-align:center; background:var(--surface); transition:.15s}
+  .pbtn .pk{font-size:12.5px; font-weight:700; color:var(--soft)}
+  .pbtn .pk .es{font-weight:500}
+  .pbtn.todo{cursor:pointer; border-color:var(--ink)}
+  .pbtn.todo:hover{background:var(--ink); }
+  .pbtn.todo:hover .pk,.pbtn.todo:hover .ph{color:#fff}
+  .pbtn.todo .ph{font-family:"Space Grotesk"; font-weight:700; font-size:15px; margin-top:6px; color:var(--ink)}
+  .pbtn.done{border-color:var(--ok); background:var(--ok-bg)}
+  .pbtn.done .pk{color:var(--ok)}
+  .pbtn.done .ph{font-family:"Space Grotesk"; font-weight:700; font-size:17px; margin-top:5px; color:var(--ink)}
+  .pbtn.wait{opacity:.5}
+  .pbtn.wait .ph{font-size:12px; margin-top:6px; color:var(--faint)}
+  .locbadge{display:inline-block; font-size:10px; font-weight:700; padding:2px 7px; border-radius:99px; margin-top:6px}
+  .loc-on{background:var(--ok-bg); color:var(--ok)} .loc-off{background:var(--danger-bg); color:var(--danger)} .loc-no{background:var(--line-2); color:var(--soft)}
+  .worktotal{display:flex; align-items:baseline; gap:8px; margin-top:14px; font-size:13px; color:var(--soft)}
+  .worktotal b{font-family:"Space Grotesk"; font-size:20px; color:var(--ink); font-weight:700}
+  .maplink{font-size:11px}
+  @media(max-width:600px){ .punchgrid{grid-template-columns:1fr 1fr} }
+
+  .subnav{display:flex; gap:6px; background:var(--line-2); padding:5px; border-radius:13px; margin-bottom:18px; max-width:520px; flex-wrap:wrap}
+  .subnav button{flex:1; padding:9px 6px; border-radius:9px; background:transparent; color:var(--soft); font-size:13.5px; line-height:1.15}
+  .subnav button.on{background:var(--surface); color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .subnav .es{font-size:9.5px}
+
+  .stats{display:grid; grid-template-columns:repeat(5,1fr); gap:11px; margin-bottom:18px}
+  .stat{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 15px}
+  .stat .n{font-family:"Space Grotesk"; font-size:24px; font-weight:700; line-height:1}
+  .stat .l{font-size:11.5px; color:var(--soft); margin-top:7px; font-weight:500}
+  .stat .l .es{margin-top:1px}
+  .stat.pto .n{color:var(--pto)} .stat.sick .n{color:var(--sick)} .stat.warn .n{color:var(--warnc)} .stat.unpaid .n{color:var(--unpaid)}
+
+  .balwrap{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px}
+  .bal{border-radius:14px; padding:16px 17px; border:1px solid var(--line); background:var(--surface)}
+  .bal .cap{font-size:12px; font-weight:700; letter-spacing:.02em; text-transform:uppercase}
+  .bal.pto .cap{color:var(--pto)} .bal.sick .cap{color:var(--sick)}
+  .bal .big{font-family:"Space Grotesk"; font-size:30px; font-weight:700; line-height:1; margin-top:8px}
+  .bal .big small{font-size:15px; color:var(--soft); font-weight:600}
+  .bal .sub2{font-size:12px; color:var(--soft); margin-top:8px; line-height:1.5}
+  .bar{height:7px; background:var(--line-2); border-radius:99px; margin-top:11px; overflow:hidden}
+  .bar span{display:block; height:100%; border-radius:99px}
+  .bal.pto .bar span{background:var(--pto)} .bal.sick .bar span{background:var(--sick)}
+
+  .sec-title{display:flex; align-items:center; gap:8px; font-size:15px; font-weight:700; margin:0 0 15px}
+  .sec-title .es{font-weight:500}
+  .sec-title .dot{width:8px;height:8px;border-radius:50%;background:var(--pto); margin-top:3px; flex:none}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:13px}
+  .segs{display:flex; gap:8px}
+  .seg{flex:1; padding:10px 6px; border:1.5px solid var(--line); border-radius:11px; background:var(--surface); font-weight:600; font-size:14px; color:var(--soft); text-align:center}
+  .seg.on-pto{border-color:var(--pto); background:var(--pto-bg); color:var(--pto)}
+  .seg.on-sick{border-color:var(--sick); background:var(--sick-bg); color:var(--sick)}
+  .seg.on-early{border-color:var(--early); background:var(--early-bg); color:var(--early)}
+  .seg.on-late{border-color:var(--late); background:var(--late-bg); color:var(--late)}
+  .seg.on-unpaid{border-color:var(--unpaid); background:var(--unpaid-bg); color:var(--unpaid)}
+  .seg.on-dur{border-color:var(--ink); background:#EDF0F1; color:var(--ink)}
+  .flabel{font-size:12.5px; font-weight:600; color:var(--soft); margin:0 0 6px 2px}
+  .row-actions{display:flex; gap:12px; margin-top:16px; align-items:center}
+  .submit{background:var(--ink); color:#fff; padding:11px 22px; text-align:center; line-height:1.15; flex:none}
+  .submit:hover{background:#0c161b}
+
+  .filters{display:flex; flex-wrap:wrap; gap:8px; margin:24px 2px 12px}
+  .filters select{width:auto; min-width:120px; padding:8px 32px 8px 11px; font-size:13px; font-weight:600; color:var(--ink); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235D6E76' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 11px center; -webkit-appearance:none; appearance:none}
+
+  .list-head{display:flex; align-items:center; justify-content:space-between; margin:0 2px 13px; gap:10px}
+  .list-head h3{font-size:16px}
+  .list-head h3 .es{font-family:"Inter";font-weight:500}
+  .count{font-size:13px; color:var(--soft); font-weight:500; margin-top:2px}
+  .export{background:var(--ok); color:#fff; padding:9px 15px; display:inline-flex; align-items:center; gap:8px; font-size:14px; line-height:1.15}
+  .export:hover{background:#186824}
+  .export svg{width:16px;height:16px; flex:none}
+  .export .txt{display:flex; flex-direction:column; text-align:left}
+  .csv{background:#25635b; color:#fff; padding:9px 14px; display:inline-flex; align-items:center; gap:7px; font-size:14px; line-height:1.15}
+  .csv:hover{background:#1d4d47}
+  .csv svg{width:16px;height:16px;flex:none}
+  .csv .txt{display:flex; flex-direction:column; text-align:left}
+  .headbtns{display:flex; gap:8px; flex-wrap:wrap}
+  .act.edit{color:var(--half)} .act.edit:hover{background:var(--half);color:#fff;border-color:var(--half)}
+
+  .overlay{position:fixed; inset:0; background:rgba(23,36,43,.42); display:grid; place-items:center; padding:18px; z-index:60; overflow:auto}
+  .modal{background:var(--surface); border-radius:18px; box-shadow:0 20px 60px rgba(0,0,0,.3); width:100%; max-width:460px; padding:22px; max-height:92vh; overflow:auto}
+  .modal h3{font-size:18px; display:flex; align-items:center; gap:8px; margin-bottom:4px}
+  .modal .msub{font-size:12.5px; color:var(--soft); margin-bottom:16px}
+  .modal-actions{display:flex; gap:10px; margin-top:18px}
+  .modal-actions .save{flex:1; background:var(--pto); color:#fff; padding:12px; text-align:center; line-height:1.15}
+  .modal-actions .save:hover{background:#268577}
+  .modal-actions .cancel{flex:none; background:transparent; color:var(--soft); border:1.5px solid var(--line); padding:12px 18px}
+  .modal-actions .cancel:hover{color:var(--ink); border-color:var(--soft)}
+
+  .req{display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--line-2)}
+  .req:last-child{border-bottom:none}
+  .badges{display:flex; flex-direction:column; gap:4px; flex:none; align-items:flex-start}
+  .badge{font-size:11px; font-weight:700; padding:5px 9px; border-radius:11px; white-space:nowrap; text-align:center; line-height:1.15; min-width:62px}
+  .badge .es{font-size:9px; font-weight:600; opacity:.75; margin-top:1px}
+  .badge.pto{background:var(--pto-bg); color:var(--pto)}
+  .badge.sick{background:var(--sick-bg); color:var(--sick)}
+  .badge.early{background:var(--early-bg); color:var(--early)}
+  .badge.late{background:var(--late-bg); color:var(--late)}
+  .badge.unpaid{background:var(--unpaid-bg); color:var(--unpaid)}
+  .sbadge{font-size:10px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap}
+  .req-main{flex:1; min-width:0}
+  .req-top{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap}
+  .req-name{font-weight:700; font-size:15px}
+  .req-days{font-size:12.5px; color:var(--soft); font-weight:600}
+  .req-dates{font-size:13.5px; color:var(--ink); margin-top:3px}
+  .req-reason{font-size:13px; color:var(--soft); margin-top:3px}
+  .req-meta{font-size:11.5px; color:#9AA8AE; margin-top:4px}
+  .acts{display:flex; gap:6px; flex:none}
+  .act{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;padding:0;border:1.5px solid var(--line);background:var(--surface)}
+  .act svg{width:17px;height:17px}
+  .act.ok{color:var(--ok)} .act.ok:hover,.act.ok.on{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .act.no{color:var(--warnc)} .act.no:hover,.act.no.on{background:var(--warnc);color:#fff;border-color:var(--warnc)}
+  .act.del{color:var(--danger)} .act.del:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+  .empty{text-align:center; padding:46px 20px; color:var(--soft)}
+  .empty svg{width:38px;height:38px; opacity:.4; margin-bottom:12px}
+  .empty .es{color:var(--faint); margin-top:3px}
+
+  table.tbl{width:100%; border-collapse:collapse; font-size:13.5px}
+  table.tbl th{ text-align:left; font-size:11px; font-weight:700; color:var(--soft); text-transform:uppercase; letter-spacing:.03em; padding:12px 12px; border-bottom:1px solid var(--line); white-space:nowrap}
+  table.tbl td{ padding:11px 12px; border-bottom:1px solid var(--line-2); vertical-align:middle}
+  table.tbl tr:last-child td{border-bottom:none}
+  table.tbl .name{font-weight:700}
+  table.tbl input{width:66px; padding:7px 9px; font-size:13px; text-align:center}
+  .rem-ok{color:var(--ok); font-weight:700} .rem-low{color:var(--danger); font-weight:700}
+  .tblwrap{overflow-x:auto}
+  .default-allow{display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; margin-bottom:6px}
+  .default-allow .field{margin:0}
+  .default-allow input{width:90px}
+
+  .note{font-size:12px; color:var(--soft); background:var(--line-2); padding:10px 13px; border-radius:11px; margin-top:22px; line-height:1.6; display:flex; gap:8px}
+  .note svg{width:15px;height:15px;flex:none;margin-top:2px}
+  .note .es{color:var(--faint); margin-top:4px}
+  .toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px); background:var(--ink); color:#fff; padding:11px 20px; border-radius:12px; font-size:13.5px; font-weight:600; opacity:0; transition:.28s; pointer-events:none; z-index:50; box-shadow:0 8px 30px rgba(0,0,0,.2); text-align:center; line-height:1.3}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media(max-width:600px){ .grid2{grid-template-columns:1fr} .stats{grid-template-columns:1fr 1fr} .balwrap{grid-template-columns:1fr} .req{flex-wrap:wrap} }
+</style>
+
+<div class="wrap" id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ config ============ */
+const CONFIGURED = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_ANON_KEY.includes("YOUR-ANON") && SUPABASE_URL.startsWith("https://");
+let db=null;
+if(CONFIGURED && window.supabase){ db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); }
+
+let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
+  requests:[], employees:{}, codes:{}, punches:[], settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null,
+  filter:{ month:'all', person:'all', status:'all', detail:'all' } };
+let channel=null, _names=[];
+
+const CAT={ pto:{label:'PTO', es:'Vacaciones', cls:'pto'}, sick:{label:'Sick', es:'Enfermedad', cls:'sick'}, unpaid:{label:'Unpaid', es:'Sin goce', cls:'unpaid'} };
+const DETAIL={
+  pto:  {label:'PTO',          es:'Vacaciones',       cat:'pto',  cls:'pto'},
+  sick: {label:'Sick',         es:'Enfermedad',       cat:'sick', cls:'sick'},
+  early:{label:'Early leave',  es:'Salida temprana',  cat:'pto',  cls:'early'},
+  late: {label:'Late coming',  es:'Llegada tarde',    cat:'pto',  cls:'late'}
+};
+const DUR={ full:{en:'Full day(s)',es:'Día(s) completo(s)'}, half:{en:'Half day',es:'Medio día'}, hourly:{en:'Hourly',es:'Por horas'} };
+const STATUS={ pending:{en:'Pending',es:'Pendiente',c:'var(--warnc)',bg:'var(--warn-bg)'},
+               approved:{en:'Approved',es:'Aprobado',c:'var(--ok)',bg:'var(--ok-bg)'},
+               rejected:{en:'Rejected',es:'Rechazado',c:'var(--danger)',bg:'var(--danger-bg)'} };
+const PUNCH=[ {k:'morning_in',en:'Morning In',es:'Entrada',io:'in'},
+              {k:'lunch_out', en:'Lunch Out', es:'Salida almuerzo',io:'out'},
+              {k:'lunch_in',  en:'Lunch In',  es:'Regreso almuerzo',io:'in'},
+              {k:'off_out',   en:'Off Work Out',es:'Salida',io:'out'} ];
+const PK={}; PUNCH.forEach(p=>PK[p.k]=p);
+function getGeo(){ return new Promise(res=>{ if(!navigator.geolocation) return res(null);
+  navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}), ()=>res(null), {enableHighAccuracy:true,timeout:10000,maximumAge:0}); }); }
+function distM(aLat,aLng,bLat,bLng){ const R=6371000,toR=x=>x*Math.PI/180; const dLat=toR(bLat-aLat),dLng=toR(bLng-aLng);
+  const s=Math.sin(dLat/2)**2+Math.cos(toR(aLat))*Math.cos(toR(bLat))*Math.sin(dLng/2)**2; return Math.round(2*R*Math.asin(Math.sqrt(s))); }
+function officeLoc(){ const la=parseFloat(state.settings.office_lat), ln=parseFloat(state.settings.office_lng); return (!isNaN(la)&&!isNaN(ln))?{lat:la,lng:ln}:null; }
+function officeRadius(){ return +(state.settings.office_radius)||200; }
+function punchesFor(name,date){ return state.punches.filter(p=>p.name===name && p.work_date===date); }
+function fmtT(v){ if(!v) return ''; const x=new Date(v); let h=x.getHours(); const ap=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${String(x.getMinutes()).padStart(2,'0')} ${ap}`; }
+function workHours(day){ const t=k=>{ const p=day.find(x=>x.kind===k); return p?new Date(p.punched_at).getTime():null; };
+  const mi=t('morning_in'),lo=t('lunch_out'),li=t('lunch_in'),oo=t('off_out'); let ms=0;
+  if(mi&&lo&&li&&oo){ ms=(lo-mi)+(oo-li); } else if(mi&&oo&&!lo&&!li){ ms=oo-mi; } else { if(mi&&lo) ms+=lo-mi; if(li&&oo) ms+=oo-li; }
+  return ms>0?ms/3600000:0; }
+function canPunchNames(){ return Object.keys(state.employees).filter(n=>state.employees[n] && state.employees[n].can_punch).sort((a,b)=>a.localeCompare(b)); }
+
+/* ============ helpers ============ */
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const es=(t)=>`<span class="es">${t}</span>`;
+function val(id){ const el=document.getElementById(id); return el?el.value:''; }
+function setErr(en,esT){ const e=document.getElementById('err'); if(e) e.innerHTML=`${en}<span class="es" style="margin-top:2px">${esT}</span>`; }
+function setCat(c){ state.cat=c; render(); }
+function setDetail(d){ state.detail=d; if(d==='early'||d==='late') state.dur='hourly'; render(); }
+function setDur(d){ state.dur=d; render(); }
+function setView(v){ state.view=v; render(); }
+function setFilter(k,v){ state.filter[k]=v; render(); }
+function clearForm(){ ['rStart','rEnd','rTime','rHours','rReason'].forEach(id=>{const el=document.getElementById(id); if(el) el.value = (id==='rHours'?'':el.value); }); const rr=document.getElementById('rReason'); if(rr) rr.value=''; }
+function fmtNum(n){ n=+n; return Number.isInteger(n)?n:n.toFixed(2).replace(/0$/,''); }
+function daysBetween(s,e){ if(!s||!e) return 1; const d=Math.round((new Date(e)-new Date(s))/864e5)+1; return d>0?d:1; }
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(d){ if(!d) return ''; const x=new Date(d+'T00:00:00'); return `${MON[x.getMonth()]} ${x.getDate()}, ${x.getFullYear()}`; }
+function fmtDT(v){ const x=new Date(v); let h=x.getHours(); const ap=h>=12?'PM':'AM'; h=h%12||12; return `${MON[x.getMonth()]} ${x.getDate()}, ${x.getFullYear()} ${h}:${String(x.getMinutes()).padStart(2,'0')} ${ap}`; }
+function fmt12(hhmm){ if(!hhmm) return ''; const [h,m]=hhmm.split(':').map(Number); const ap=h>=12?'PM':'AM'; const hh=h%12||12; return `${hh}:${String(m).padStart(2,'0')} ${ap}`; }
+function addHours(hhmm,hrs){ if(!hhmm) return ''; let [h,m]=hhmm.split(':').map(Number); let tot=h*60+m + Math.round(hrs*60); tot=((tot%1440)+1440)%1440; const H=Math.floor(tot/60), M=tot%60; return `${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}`; }
+function today(){ return new Date().toISOString().slice(0,10); }
+function hpd(){ return +(state.settings.hours_per_day)||8; }
+function toast(msg){ const t=document.getElementById('toast'); t.innerHTML=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2400); }
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function curYear(){ return new Date().getFullYear(); }
+function reqYear(r){ return new Date((r.start||today())+'T00:00:00').getFullYear(); }
+
+/* ============ data ============ */
+function mapRow(r){
+  let cat=r.type, dur=r.duration||'full';
+  if(r.type==='half'){ cat='pto'; dur='half'; }        // resilience for un-migrated rows
+  return { id:r.id, name:r.name, cat, dur, detail:(r.detail||cat), start:r.start_date, end:r.end_date, days:+r.days,
+           startTime:r.start_time, hours:(r.hours!=null?+r.hours:null),
+           reason:r.reason, by:r.submitted_by, status:r.status||'pending',
+           reviewedBy:r.reviewed_by, reviewedAt:r.reviewed_at, editedBy:r.edited_by, editedAt:r.edited_at, createdAt:r.created_at };
+}
+async function loadRequests(){
+  if(!db) return;
+  const { data, error } = await db.from('requests').select('*').order('created_at',{ascending:false});
+  if(error){ console.error(error); toast('Load failed · Error al cargar'); } else state.requests=(data||[]).map(mapRow);
+  render();
+}
+async function loadSettings(){ if(!db) return; const { data } = await db.from('settings').select('*'); (data||[]).forEach(s=>{ state.settings[s.key]=s.value; }); }
+async function loadEmployees(){ if(!db) return; const { data } = await db.from('employees').select('*'); const m={}; (data||[]).forEach(e=>{ m[e.name]={ pto_allowance:e.pto_allowance, sick_allowance:e.sick_allowance, can_punch:!!e.can_punch }; }); state.employees=m; }
+async function loadPunches(){ if(!db) return; const { data } = await db.from('punches').select('*').order('punched_at',{ascending:false}).limit(1000); state.punches=data||[]; render(); }
+async function loadAuth(){ if(!db || state.role!=='admin') return; const { data } = await db.from('employee_auth').select('*'); const m={}; (data||[]).forEach(a=>{ m[a.name]=a.login_code||''; }); state.codes=m; }
+async function loadAudit(){ if(!db || state.role!=='admin') return; const { data } = await db.from('audit_log').select('*').order('created_at',{ascending:false}).limit(200); state.audit=data||[]; }
+async function logAudit(action, detail){ try{ await db.from('audit_log').insert({ action, detail, actor:state.user }); }catch(e){} }
+function subscribeRealtime(){
+  if(!db || channel) return;
+  channel = db.channel('pto-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'requests'}, ()=>loadRequests())
+    .on('postgres_changes',{event:'*',schema:'public',table:'employees'}, ()=>loadEmployees().then(render))
+    .on('postgres_changes',{event:'*',schema:'public',table:'settings'},  ()=>loadSettings().then(render))
+    .on('postgres_changes',{event:'*',schema:'public',table:'punches'},   ()=>loadPunches())
+    .subscribe();
+}
+
+/* ============ auth / nav ============ */
+async function doEmployeeLogin(){
+  const code=val('empCode').trim();
+  if(!code) return setErr('Enter your login code.','Ingresa tu código.');
+  const { data, error } = await db.rpc('verify_code', { code });
+  if(error){ console.error(error); return setErr('Login failed, try again.','Error, inténtalo de nuevo.'); }
+  if(!data){ return setErr('Code not recognized — check with your admin.','Código no reconocido — consulta con tu administrador.'); }
+  lsSet('pto_emp', data); state.role='employee'; state.user=data; state.view='requests'; enterDash();
+}
+async function doAdminLogin(){
+  const email=val('admId').trim(), pw=val('admPw');
+  if(!email||!pw) return setErr('Enter email and password.','Ingresa correo y contraseña.');
+  const { data, error } = await db.auth.signInWithPassword({ email, password: pw });
+  if(error){ setErr('Incorrect email or password.','Correo o contraseña incorrectos.'); return; }
+  state.role='admin'; state.user=data.user.email; state.view='requests'; enterDash();
+}
+async function enterDash(){
+  state.screen='dash'; render();
+  await Promise.all([loadSettings(), loadEmployees()]);
+  await loadRequests();
+  await loadPunches();
+  if(state.role==='admin'){ await loadAuth(); await loadAudit(); }
+  render(); subscribeRealtime();
+}
+async function logout(){ if(state.role==='admin' && db){ try{ await db.auth.signOut(); }catch(e){} } lsDel('pto_emp'); state.user=null; state.role=null; state.screen='login'; state.tab='employee'; render(); }
+
+/* ============ actions ============ */
+async function submitReq(){
+  if(state.busy) return;
+  const name=val('rName').trim(), cat=state.cat, detail=state.detail, dur=state.dur, start=val('rStart');
+  if(!name) return toast('Enter a name<span class="b-es">Ingresa un nombre</span>');
+  if(!start) return toast('Pick a start date<span class="b-es">Elige la fecha de inicio</span>');
+  let end=start, days=0, startTime=null, hours=null;
+  if(dur==='full'){
+    end=val('rEnd'); if(!end) return toast('Pick an end date<span class="b-es">Elige la fecha de fin</span>');
+    days=daysBetween(start,end);
+  } else if(dur==='half'){
+    days=0.5;
+  } else { // hourly
+    startTime=val('rTime'); hours=parseInt(val('rHours'),10);
+    if(!startTime) return toast('Pick a start time<span class="b-es">Elige la hora de inicio</span>');
+    if(!hours || hours<=0) return toast('Enter hours (whole)<span class="b-es">Ingresa las horas (enteras)</span>');
+    days = Math.round((hours/hpd())*100)/100;
+  }
+  if(cat==='unpaid'){
+    const ptoLeft=allowanceFor(name,'pto')-usageFor(name,'pto','approved');
+    const sickLeft=allowanceFor(name,'sick')-usageFor(name,'sick','approved');
+    if(ptoLeft>0 || sickLeft>0){
+      const msg=`Heads up — ${name} still has balance left:\n`+
+        (ptoLeft>0?`  • PTO: ${fmtNum(ptoLeft)} day(s)\n`:'')+
+        (sickLeft>0?`  • Sick: ${fmtNum(sickLeft)} day(s)\n`:'')+
+        `\nUnpaid does not use any balance. Submit as Unpaid anyway?\n\n`+
+        `Aviso — a ${name} le queda saldo`+
+        (ptoLeft>0?` · PTO: ${fmtNum(ptoLeft)}`:'')+(sickLeft>0?` · Enfermedad: ${fmtNum(sickLeft)}`:'')+
+        `. ¿Enviar como Sin goce de todas formas?`;
+      if(!confirm(msg)) return;
+    }
+  }
+  state.busy=true;
+  const { error } = await db.from('requests').insert({ name, type:cat, detail, duration:dur, start_date:start, end_date:end, start_time:startTime, hours, days, reason:(val('rReason').trim()||null), submitted_by:state.user, status:'pending' });
+  state.busy=false;
+  if(error){ console.error(error); toast('Could not add · No se pudo agregar'); return; }
+  toast('Request added<span class="b-es">Solicitud agregada</span>');
+  clearForm(); await loadRequests();
+}
+function summ(r){
+  const dl=(DETAIL[r.detail]||CAT[r.cat]||CAT.pto).label;
+  if(r.dur==='hourly') return `${dl} · ${r.name} · ${r.start} ${fmt12(r.startTime)} (${r.hours}h)`;
+  return `${dl} · ${r.name} · ${r.start}${r.start!==r.end?'→'+r.end:''} (${fmtNum(r.days)}d)`;
+}
+async function setStatus(id, status){
+  const r=state.requests.find(x=>x.id===id); if(!r) return;
+  const { error } = await db.from('requests').update({ status, reviewed_by:state.user, reviewed_at:new Date().toISOString() }).eq('id', id);
+  if(error){ console.error(error); toast('Only admins can do this<span class="b-es">Solo administradores</span>'); return; }
+  await logAudit(status==='approved'?'approve':'reject', summ(r)); await loadAudit();
+  toast((status==='approved'?'Approved':'Rejected')+`<span class="b-es">${status==='approved'?'Aprobado':'Rechazado'}</span>`);
+  await loadRequests();
+}
+async function delReq(id){
+  const r=state.requests.find(x=>x.id===id);
+  if(!confirm('Delete this request? This cannot be undone.\n¿Eliminar esta solicitud? No se puede deshacer.')) return;
+  const { error } = await db.from('requests').delete().eq('id', id);
+  if(error){ console.error(error); toast('Delete failed — admins only<span class="b-es">Error — solo administradores</span>'); return; }
+  if(r) await logAudit('delete', summ(r)); await loadAudit();
+  toast('Deleted<span class="b-es">Eliminado</span>'); await loadRequests();
+}
+/* ---- admin edit ---- */
+function openEdit(id){ const r=state.requests.find(x=>x.id===id); if(!r) return; state.editing=Object.assign({}, r); render(); }
+function closeEdit(){ state.editing=null; render(); }
+function captureEdit(){ const e=state.editing; if(!e) return; const g=id=>{const el=document.getElementById(id); return el?el.value:undefined;};
+  let v; if((v=g('eName'))!==undefined)e.name=v; if((v=g('eStart'))!==undefined)e.start=v; if((v=g('eEnd'))!==undefined)e.end=v;
+  if((v=g('eTime'))!==undefined)e.startTime=v; if((v=g('eHours'))!==undefined)e.hours=v; if((v=g('eReason'))!==undefined)e.reason=v; }
+function setEditCat(c){ captureEdit(); state.editing.cat=c; render(); }
+function setEditDetail(d){ captureEdit(); state.editing.detail=d; if(d==='early'||d==='late') state.editing.dur='hourly'; render(); }
+function setEditDur(d){ captureEdit(); state.editing.dur=d; render(); }
+async function saveEdit(){
+  captureEdit(); const e=state.editing; if(!e) return;
+  const cat=e.cat||'pto';
+  if(!e.name || !e.name.trim()) return toast('Enter a name · Ingresa un nombre');
+  if(!e.start) return toast('Pick a start date · Elige la fecha');
+  let end=e.start, days=0, startTime=null, hours=null;
+  if(e.dur==='full'){ end=e.end||e.start; days=daysBetween(e.start,end); }
+  else if(e.dur==='half'){ days=0.5; }
+  else { startTime=e.startTime; hours=parseInt(e.hours,10); if(!startTime) return toast('Pick a start time · Elige la hora'); if(!hours||hours<=0) return toast('Enter hours · Ingresa las horas'); days=Math.round((hours/hpd())*100)/100; }
+  const payload={ name:e.name.trim(), type:cat, detail:e.detail, duration:e.dur, start_date:e.start, end_date:end, start_time:startTime, hours, days, reason:(e.reason&&e.reason.trim())||null, edited_at:new Date().toISOString(), edited_by:state.user };
+  const { error } = await db.from('requests').update(payload).eq('id', e.id);
+  if(error){ console.error(error); toast('Only admins can edit · Solo administradores'); return; }
+  await logAudit('edit', summ({cat,detail:e.detail,name:payload.name,start:e.start,end,dur:e.dur,startTime,hours,days}));
+  await loadAudit(); state.editing=null; toast('Saved<span class="b-es">Guardado</span>'); await loadRequests();
+}
+
+/* ---- CSV export (opens in Excel; UTF-8 BOM) ---- */
+function toCSV(rows){
+  if(!rows.length) return '';
+  const headers=Object.keys(rows[0]);
+  const cell=v=>{ v=(v==null?'':String(v)); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const lines=[headers.map(cell).join(',')].concat(rows.map(r=>headers.map(h=>cell(r[h])).join(',')));
+  return '\uFEFF'+lines.join('\r\n');
+}
+function downloadCSV(filename, text){
+  const blob=new Blob([text],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+function requestRowsForExport(){
+  return filteredRequests().slice().sort((a,b)=> new Date(a.createdAt)-new Date(b.createdAt)).map(r=>({
+    'Name':r.name,'Category':CAT[r.cat].label,'Detail':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration':DUR[r.dur].en,'Status':STATUS[r.status].en,
+    'Date':fmtDate(r.start),'End':(r.dur==='full'?fmtDate(r.end):''),'Start time':(r.dur==='hourly'?fmt12(r.startTime):''),
+    'Hours':(r.dur==='hourly'?r.hours:''),'Days':r.days,'Reason':r.reason||'',
+    'Submitted':fmtDT(r.createdAt),'By':r.by||'','Reviewed by':r.reviewedBy||'','Edited by':r.editedBy||''
+  }));
+}
+function exportRequestsCSV(){
+  const rows=requestRowsForExport();
+  if(!rows.length){ toast('Nothing to export · Nada para exportar'); return; }
+  downloadCSV(`PTO_SickLeave_${today()}.csv`, toCSV(rows));
+  toast('CSV downloaded<span class="b-es">CSV descargado</span>');
+}
+function balanceRowsForExport(){
+  return allEmployeeNames().map(n=>({
+    'Name':n,'Year':curYear(),
+    'PTO allowance':allowanceFor(n,'pto'),'PTO used':usageFor(n,'pto','approved'),'PTO pending':usageFor(n,'pto','pending'),'PTO remaining':allowanceFor(n,'pto')-usageFor(n,'pto','approved'),
+    'Sick allowance':allowanceFor(n,'sick'),'Sick used':usageFor(n,'sick','approved'),'Sick pending':usageFor(n,'sick','pending'),'Sick remaining':allowanceFor(n,'sick')-usageFor(n,'sick','approved'),
+    'Unpaid used':usageFor(n,'unpaid','approved')
+  }));
+}
+function exportBalancesCSV(){
+  const rows=balanceRowsForExport();
+  if(!rows.length){ toast('Nothing to export · Nada para exportar'); return; }
+  downloadCSV(`Balances_${curYear()}_${today()}.csv`, toCSV(rows));
+  toast('CSV downloaded<span class="b-es">CSV descargado</span>');
+}
+
+async function setAllowanceByIdx(i, kind, value){
+  const name=_names[i]; if(name==null) return;
+  const cur=state.employees[name]||{};
+  const rec={ name, pto_allowance:cur.pto_allowance ?? null, sick_allowance:cur.sick_allowance ?? null };
+  rec[kind+'_allowance'] = (value===''||value==null)?null:+value;
+  const { error } = await db.from('employees').upsert(rec,{onConflict:'name'});
+  if(error){ console.error(error); toast('Could not save · No se pudo guardar'); return; }
+  await logAudit('allowance', `${name}: ${kind} = ${rec[kind+'_allowance']==null?'default':rec[kind+'_allowance']}`);
+  await loadEmployees(); await loadAudit(); toast('Saved<span class="b-es">Guardado</span>'); render();
+}
+async function setDefault(key, value){
+  const { error } = await db.from('settings').upsert({ key, value:String(value) },{onConflict:'key'});
+  if(error){ console.error(error); toast('Could not save · No se pudo guardar'); return; }
+  await logAudit('setting', `${key} = ${value}`);
+  await loadSettings(); await loadAudit(); toast('Saved<span class="b-es">Guardado</span>'); render();
+}
+
+/* ============ balances ============ */
+function allowanceFor(name, kind){ const e=state.employees[name]; if(e && e[kind+'_allowance']!=null && e[kind+'_allowance']!=='') return +e[kind+'_allowance']; return +(state.settings[kind+'_allowance']||0); }
+function usageFor(name, kind, status){ return state.requests.filter(r=> r.name===name && reqYear(r)===curYear() && r.cat===kind && r.status===status).reduce((s,r)=>s+(+r.days||0),0); }
+function allEmployeeNames(){ const set=new Set(); state.requests.forEach(r=>set.add(r.name)); Object.keys(state.employees).forEach(n=>set.add(n)); return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+function rosterNames(){ return Object.keys(state.employees).filter(Boolean).sort((a,b)=>a.localeCompare(b)); }
+async function _rosterAdd(name){
+  if(!name) return;
+  if(rosterNames().includes(name)){ toast('Already on the roster · Ya está en la lista'); return; }
+  const { error } = await db.from('employees').upsert({ name, pto_allowance:null, sick_allowance:null },{onConflict:'name'});
+  if(error){ console.error(error); toast('Could not add · No se pudo agregar'); return; }
+  await logAudit('roster', `added ${name}`); await loadEmployees(); await loadAudit();
+  toast('Employee added<span class="b-es">Empleado agregado</span>'); render();
+}
+async function addEmployee(){ const el=document.getElementById('newEmp'); const name=el?el.value.trim():''; if(!name) return toast('Enter a name · Ingresa un nombre'); if(el) el.value=''; _rosterAdd(name); }
+async function addToRosterByIdx(i){ _rosterAdd(_names[i]); }
+async function setCodeByIdx(i, value){
+  const name=_names[i]; if(name==null) return;
+  const code=(value||'').trim();
+  if(code){
+    const dupe=Object.keys(state.codes).find(n=>n!==name && state.codes[n]===code);
+    if(dupe){ toast('Code already used by '+dupe+' · Código ya usado'); return; }
+  }
+  const { error } = await db.from('employee_auth').upsert({ name, login_code: code||null },{onConflict:'name'});
+  if(error){ console.error(error); toast(error.code==='23505'?'Code already used · Código ya usado':'Could not save · No se pudo guardar'); return; }
+  await logAudit('code', `${name}: login code ${code?'set/updated':'cleared'}`);
+  await loadAuth(); await loadAudit(); toast('Code saved<span class="b-es">Código guardado</span>'); render();
+}
+
+/* ---- punch clock ---- */
+async function setPunchByIdx(i, checked){
+  const name=_names[i]; if(name==null) return;
+  const cur=state.employees[name]||{};
+  const rec={ name, pto_allowance:cur.pto_allowance ?? null, sick_allowance:cur.sick_allowance ?? null, can_punch:!!checked };
+  const { error } = await db.from('employees').upsert(rec,{onConflict:'name'});
+  if(error){ console.error(error); toast('Could not save · No se pudo guardar'); return; }
+  await logAudit('punchset', `${name}: punch ${checked?'enabled':'disabled'}`);
+  await loadEmployees(); await loadAudit(); toast('Saved<span class="b-es">Guardado</span>'); render();
+}
+let _punchBusy=false;
+async function doPunch(kind){
+  if(_punchBusy) return; const name=state.user;
+  const todays=punchesFor(name, today());
+  if(todays.some(p=>p.kind===kind)){ toast('Already punched · Ya registrado'); return; }
+  const order=PUNCH.map(p=>p.k), idx=order.indexOf(kind);
+  for(let j=0;j<idx;j++){ if(!todays.some(p=>p.kind===order[j])){ toast(`Do "${PK[order[j]].en}" first · Primero ${PK[order[j]].es}`); return; } }
+  _punchBusy=true; toast('Getting location… · Obteniendo ubicación…');
+  const geo=await getGeo();
+  let lat=null,lng=null,acc=null,dist=null;
+  if(geo){ lat=geo.lat; lng=geo.lng; acc=Math.round(geo.acc); const o=officeLoc(); if(o) dist=distM(o.lat,o.lng,lat,lng); }
+  const { error } = await db.from('punches').insert({ name, kind, work_date:today(), punched_at:new Date().toISOString(), lat, lng, accuracy:acc, distance_m:dist });
+  _punchBusy=false;
+  if(error){ console.error(error); toast('Punch failed · Error al registrar'); return; }
+  toast(`${PK[kind].en} ${fmtT(new Date())}${geo?'':' · No location'}<span class="b-es">Registrado</span>`);
+  await loadPunches();
+}
+async function delPunchDay(name, date){
+  if(!confirm(`Delete all punches for ${name} on ${date}?\n¿Eliminar los registros de ${name} el ${date}?`)) return;
+  const { error } = await db.from('punches').delete().eq('name', name).eq('work_date', date);
+  if(error){ console.error(error); toast('Only admins · Solo administradores'); return; }
+  await logAudit('punchdel', `${name} · ${date}`); await loadAudit();
+  toast('Deleted<span class="b-es">Eliminado</span>'); await loadPunches();
+}
+async function useCurrentOffice(){
+  toast('Getting location… · Obteniendo ubicación…');
+  const g=await getGeo();
+  if(!g){ toast('Location unavailable · Ubicación no disponible'); return; }
+  await db.from('settings').upsert({key:'office_lat',value:String(g.lat)},{onConflict:'key'});
+  await db.from('settings').upsert({key:'office_lng',value:String(g.lng)},{onConflict:'key'});
+  await logAudit('setting', `office set to ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}`);
+  await loadSettings(); await loadAudit(); toast('Office location saved<span class="b-es">Ubicación guardada</span>'); render();
+}
+async function removeEmployee(i){
+  const name=_names[i]; if(name==null) return;
+  if(!confirm(`Remove ${name} from the roster? Their past requests stay.\n¿Quitar a ${name} de la lista? Sus solicitudes se conservan.`)) return;
+  const { error } = await db.from('employees').delete().eq('name', name);
+  if(error){ console.error(error); toast('Could not remove · No se pudo quitar'); return; }
+  await logAudit('roster', `removed ${name}`); await loadEmployees(); await loadAudit();
+  toast('Removed<span class="b-es">Quitado</span>'); render();
+}
+
+/* ============ excel ============ */
+function exportExcel(){
+  if(typeof XLSX==='undefined'){ toast('Excel module still loading<span class="b-es">El módulo aún se carga</span>'); return; }
+  const list=filteredRequests(); if(!list.length){ toast('Nothing to export · Nada para exportar'); return; }
+  const rows=list.slice().sort((a,b)=> new Date(a.createdAt)-new Date(b.createdAt)).map(r=>({
+    'Name / Nombre':r.name,'Category / Categoría':`${CAT[r.cat].label} (${CAT[r.cat].es})`,'Detail / Detalle':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration / Duración':DUR[r.dur].en,
+    'Status / Estado':STATUS[r.status].en,'Date / Fecha':fmtDate(r.start),'End / Fin':(r.dur==='full'?fmtDate(r.end):''),
+    'Start time / Hora':(r.dur==='hourly'?fmt12(r.startTime):''),'Hours / Horas':(r.dur==='hourly'?r.hours:''),
+    'Days / Días':r.days,'Reason / Motivo':r.reason||'','Submitted / Enviado':fmtDT(r.createdAt),'By / Por':r.by||'','Reviewed by / Revisado':r.reviewedBy||''
+  }));
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[{wch:16},{wch:20},{wch:14},{wch:14},{wch:12},{wch:15},{wch:15},{wch:12},{wch:9},{wch:9},{wch:24},{wch:22},{wch:16},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,ws,'Requests');
+  const bnames=allEmployeeNames();
+  if(bnames.length){
+    const brows=bnames.map(n=>({ 'Name / Nombre':n,
+      'PTO allowance':allowanceFor(n,'pto'),'PTO used':usageFor(n,'pto','approved'),'PTO pending':usageFor(n,'pto','pending'),'PTO remaining':allowanceFor(n,'pto')-usageFor(n,'pto','approved'),
+      'Sick allowance':allowanceFor(n,'sick'),'Sick used':usageFor(n,'sick','approved'),'Sick pending':usageFor(n,'sick','pending'),'Sick remaining':allowanceFor(n,'sick')-usageFor(n,'sick','approved'),
+      'Unpaid used':usageFor(n,'unpaid','approved') }));
+    const bws=XLSX.utils.json_to_sheet(brows);
+    bws['!cols']=[{wch:16},{wch:13},{wch:10},{wch:11},{wch:13},{wch:13},{wch:10},{wch:11},{wch:13},{wch:12}];
+    XLSX.utils.book_append_sheet(wb,bws,`Balances ${curYear()}`);
+  }
+  XLSX.writeFile(wb,`PTO_SickLeave_${today()}.xlsx`);
+  toast('Excel downloaded<span class="b-es">Excel descargado</span>');
+}
+
+/* ============ filtering ============ */
+function filteredRequests(){
+  const f=state.filter;
+  return state.requests.filter(r=>{
+    if(f.person!=='all' && r.name!==f.person) return false;
+    if(f.status!=='all' && r.status!==f.status) return false;
+    if(f.detail!=='all' && r.detail!==f.detail) return false;
+    if(f.month!=='all' && (r.start||'').slice(0,7)!==f.month) return false;
+    return true;
+  });
+}
+
+/* ============ icons ============ */
+const IC={
+  leaf:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>',
+  excel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9.5 12 5 5m0-5-5 5"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+  x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  csv:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>'
+};
+
+/* ============ render ============ */
+function render(){
+  const app=document.getElementById('app');
+  if(!CONFIGURED) return renderConfig(app);
+  if(state.screen==='loading'){ app.innerHTML=`<div class="center"><div style="color:var(--soft);text-align:center">Loading…<span class="es">Cargando…</span></div></div>`; return; }
+  if(state.screen==='login') return renderLogin(app);
+  return renderDash(app);
+}
+
+function renderConfig(app){
+  app.innerHTML=`<div class="center"><div class="card pad authcard wide">
+    <div class="logo">${IC.leaf}</div>
+    <h2>Almost ready — connect Supabase</h2>
+    <p class="sub">This app shares data live through a free Supabase database. One-time setup:</p>
+    <ol class="steps">
+      <li>Create a free project at <a href="https://supabase.com" target="_blank">supabase.com</a>.</li>
+      <li>Open <b>SQL Editor</b> and run the <code>supabase_setup.sql</code> script.</li>
+      <li><b>Authentication → Users → Add user</b> → add your <b>3 admins</b> (email + password, <b>Auto Confirm</b> ON).</li>
+      <li><b>Project Settings → API</b> → copy <b>Project URL</b> and <b>anon public</b> key.</li>
+      <li>Paste them into the two lines near the top of this file:
+        <pre>const SUPABASE_URL      = "https://xxxx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGci...";</pre></li>
+      <li>Host it: drag this file onto <a href="https://app.netlify.com/drop" target="_blank">app.netlify.com/drop</a>, then share the link.</li>
+    </ol>
+    <div class="warn"><b>Shared across locations:</b> everyone opens the same link and all data lives in Supabase, so it updates in real time. Approvals, deletes, and balances are enforced by the database.</div>
+  </div></div>`;
+}
+
+function renderLogin(app){
+  const emp = state.tab==='employee';
+  app.innerHTML=`<div class="center"><div class="card pad authcard">
+    <div class="logo">${IC.leaf}</div>
+    <h2>PTO &amp; Sick Leave<span class="es-h">Vacaciones y días por enfermedad</span></h2>
+    <p class="sub">Request time off and see it all at a glance${es('Solicita tus días libres y velo todo de un vistazo')}</p>
+    <div class="tabs">
+      <button class="${emp?'on':''}" onclick="state.tab='employee';render()">Employee<span class="tab-es">Empleado</span></button>
+      <button class="${!emp?'on':''}" onclick="state.tab='admin';render()">Admin<span class="tab-es">Administrador</span></button>
+    </div>
+    ${emp ? `
+      <div class="field"><label>Login code${es('Código de acceso')}</label><input id="empCode" type="password" placeholder="Enter your code · Ingresa tu código" onkeydown="if(event.key==='Enter')doEmployeeLogin()"></div>
+      <button class="btn-primary" onclick="doEmployeeLogin()">Log in<span class="b-es">Iniciar sesión</span></button>
+      <div class="err" id="err"></div>
+      <div class="hint">Enter the personal code your admin gave you.${es('Ingresa el código personal que te dio tu administrador.')}No code yet? Ask an admin.${es('¿Sin código? Pídelo a un administrador.')}</div>
+    ` : `
+      <div class="field"><label>Admin email${es('Correo del administrador')}</label><input id="admId" type="email" placeholder="admin@company.com"></div>
+      <div class="field"><label>Password${es('Contraseña')}</label><input id="admPw" type="password" placeholder="••••••" onkeydown="if(event.key==='Enter')doAdminLogin()"></div>
+      <button class="btn-primary" onclick="doAdminLogin()">Admin log in<span class="b-es">Iniciar sesión como administrador</span></button>
+      <div class="err" id="err"></div>
+      <div class="hint">Each admin uses their own email + password.${es('Cada administrador usa su propio correo y contraseña.')}</div>
+    `}
+  </div></div>`;
+}
+
+function renderDash(app){
+  const isAdmin=state.role==='admin';
+  let body = (state.view==='balances'&&isAdmin)?viewBalances() : (state.view==='audit'&&isAdmin)?viewAudit() : (state.view==='punch'&&isAdmin)?viewPunch() : viewRequests(isAdmin);
+  app.innerHTML=`
+    <div class="topbar">
+      <div class="brand"><div class="logo">${IC.leaf}</div>
+        <div><h1>PTO &amp; Sick Leave <span class="live" title="Live sync"></span></h1><p>Vacaciones y enfermedad · ${state.requests.length} total</p></div>
+      </div>
+      <div class="who">
+        <span><b>${esc(state.user)}</b></span>
+        <span class="pill-role ${isAdmin?'admin':''}">${isAdmin?'Admin':'Employee'}${es(isAdmin?'Administrador':'Empleado')}</span>
+        <button class="ghost" onclick="logout()">Log out<span class="es">Cerrar sesión</span></button>
+      </div>
+    </div>
+    ${isAdmin ? `<div class="subnav">
+      <button class="${state.view==='requests'?'on':''}" onclick="setView('requests')">Requests<span class="es">Solicitudes</span></button>
+      <button class="${state.view==='balances'?'on':''}" onclick="setView('balances')">Balances<span class="es">Saldos</span></button>
+      <button class="${state.view==='punch'?'on':''}" onclick="setView('punch')">Punch<span class="es">Fichaje</span></button>
+      <button class="${state.view==='audit'?'on':''}" onclick="setView('audit')">Audit log<span class="es">Registro</span></button>
+    </div>`:''}
+    ${body}
+    ${(isAdmin && state.editing)?editModal():''}`;
+}
+
+function editModal(){
+  const e=state.editing, dt=e.detail||e.cat, d=e.dur;
+  let fields;
+  if(d==='full'){
+    fields=`<div class="grid2">
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="eEnd" type="date" value="${esc(e.end||e.start||today())}"></div>
+    </div>`;
+  } else if(d==='half'){
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>`;
+  } else {
+    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
+      <div class="grid2">
+        <div><label>Start time${es('Hora de inicio')}</label><input id="eTime" type="time" value="${esc(e.startTime||'08:00')}"></div>
+        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="eHours" type="number" min="1" step="1" value="${esc(e.hours!=null?e.hours:'')}"></div>
+      </div>`;
+  }
+  return `<div class="overlay" onclick="if(event.target===this)closeEdit()"><div class="modal">
+    <h3>${IC.pencil} Edit request</h3>
+    <div class="msub">Editing ${esc(e.name)}'s request · status stays ${STATUS[e.status].en}</div>
+    <div class="field"><label>Name${es('Nombre')}</label><input id="eName" value="${esc(e.name||'')}"></div>
+    <div class="flabel">Category${es('Categoría')}</div>
+    <div class="segs" style="margin-bottom:13px; flex-wrap:wrap">
+      <div class="seg ${e.cat==='pto'?'on-pto':''}" onclick="setEditCat('pto')">PTO<span class="seg-es">Vacaciones</span></div>
+      <div class="seg ${e.cat==='sick'?'on-sick':''}" onclick="setEditCat('sick')">Sick<span class="seg-es">Enfermedad</span></div>
+      <div class="seg ${e.cat==='unpaid'?'on-unpaid':''}" onclick="setEditCat('unpaid')">Unpaid<span class="seg-es">Sin goce</span></div>
+    </div>
+    <div class="flabel">Detail${es('Detalle')}</div>
+    <div class="segs" style="margin-bottom:13px; flex-wrap:wrap">
+      <div class="seg ${dt==='pto'?'on-pto':''}" onclick="setEditDetail('pto')">PTO<span class="seg-es">Vacaciones</span></div>
+      <div class="seg ${dt==='sick'?'on-sick':''}" onclick="setEditDetail('sick')">Sick<span class="seg-es">Enfermedad</span></div>
+      <div class="seg ${dt==='early'?'on-early':''}" onclick="setEditDetail('early')">Early leave<span class="seg-es">Salida temprana</span></div>
+      <div class="seg ${dt==='late'?'on-late':''}" onclick="setEditDetail('late')">Late coming<span class="seg-es">Llegada tarde</span></div>
+    </div>
+    <div class="flabel">Duration${es('Duración')}</div>
+    <div class="segs" style="margin-bottom:13px">
+      <div class="seg ${d==='full'?'on-dur':''}" onclick="setEditDur('full')">Full day(s)<span class="seg-es">Completo</span></div>
+      <div class="seg ${d==='half'?'on-dur':''}" onclick="setEditDur('half')">Half day<span class="seg-es">Medio día</span></div>
+      <div class="seg ${d==='hourly'?'on-dur':''}" onclick="setEditDur('hourly')">Hourly<span class="seg-es">Por horas</span></div>
+    </div>
+    ${fields}
+    <div class="field" style="margin-top:13px"><label>Reason (optional)${es('Motivo (opcional)')}</label><input id="eReason" value="${esc(e.reason||'')}"></div>
+    <div class="modal-actions">
+      <button class="save" onclick="saveEdit()">Save changes<span class="b-es">Guardar cambios</span></button>
+      <button class="cancel" onclick="closeEdit()">Cancel<span class="es">Cancelar</span></button>
+    </div>
+  </div></div>`;
+}
+
+/* ---------- Requests view ---------- */
+function viewRequests(isAdmin){
+  const list=filteredRequests();
+  const ptoDays=list.filter(r=>r.cat==='pto').reduce((s,r)=>s+(+r.days||0),0);
+  const sickDays=list.filter(r=>r.cat==='sick').reduce((s,r)=>s+(+r.days||0),0);
+  const unpaidDays=list.filter(r=>r.cat==='unpaid').reduce((s,r)=>s+(+r.days||0),0);
+  const pending=list.filter(r=>r.status==='pending').length;
+  const c=state.cat, d=state.dur, dt=state.detail;
+  let unpaidWarn='';
+  if(c==='unpaid'){
+    const el=document.getElementById('rName');
+    const nm=((el?el.value:'')||state.user||'').trim();
+    if(nm){
+      const pL=allowanceFor(nm,'pto')-usageFor(nm,'pto','approved');
+      const sL=allowanceFor(nm,'sick')-usageFor(nm,'sick','approved');
+      if(pL>0||sL>0){
+        const parts=[pL>0?`PTO ${fmtNum(pL)}`:null, sL>0?`Sick ${fmtNum(sL)}`:null].filter(Boolean).join(' · ');
+        unpaidWarn=`<div class="warnbox">${IC.info}<div><b>${esc(nm)}</b> still has balance left (${parts}). Unpaid uses no balance — use it only if PTO/Sick can't cover this.<span class="es">A ${esc(nm)} aún le queda saldo. Sin goce no usa saldo; úsalo solo si PTO/Enfermedad no alcanza.</span></div></div>`;
+      }
+    }
+  }
+  const nameField = state.role==='admin'
+    ? `<label>Employee${es('Empleado')}</label><select id="rName" onchange="if(state.cat==='unpaid')render()"><option value="">— Select · Seleccionar —</option>${rosterNames().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>`
+    : `<label>Name${es('Nombre')}</label><input id="rName" value="${esc(state.user||'')}" readonly style="background:var(--line-2);color:var(--soft);cursor:not-allowed">`;
+
+  const balHtml = state.role==='employee' ? balanceCard(state.user) : '';
+  const punchHtml = (state.role==='employee' && state.employees[state.user] && state.employees[state.user].can_punch) ? punchCard(state.user) : '';
+
+  const months=[...new Set(state.requests.map(r=>(r.start||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  const persons=[...new Set(state.requests.map(r=>r.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const monOpt=`<option value="all">All months · Todos los meses</option>`+months.map(m=>{const[y,mm]=m.split('-');return `<option value="${m}" ${state.filter.month===m?'selected':''}>${MON[+mm-1]} ${y}</option>`;}).join('');
+  const perOpt=`<option value="all">All people · Todas las personas</option>`+persons.map(p=>`<option value="${esc(p)}" ${state.filter.person===p?'selected':''}>${esc(p)}</option>`).join('');
+  const stOpt=`<option value="all">All status · Todos</option>`+['pending','approved','rejected'].map(s=>`<option value="${s}" ${state.filter.status===s?'selected':''}>${STATUS[s].en} · ${STATUS[s].es}</option>`).join('');
+  const caOpt=`<option value="all">All types · Todos</option>`+['pto','sick','early','late'].map(k=>`<option value="${k}" ${state.filter.detail===k?'selected':''}>${DETAIL[k].label} · ${DETAIL[k].es}</option>`).join('');
+
+  let fields;
+  if(d==='full'){
+    fields=`<div class="grid2">
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}"></div>
+    </div>`;
+  } else if(d==='half'){
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}"></div>`;
+  } else {
+    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}"></div>
+      <div class="grid2">
+        <div><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>
+        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4"></div>
+      </div>`;
+  }
+
+  return `
+    ${punchHtml}
+    ${balHtml}
+    <div class="stats">
+      <div class="stat"><div class="n">${list.length}</div><div class="l">Shown requests${es('Solicitudes mostradas')}</div></div>
+      <div class="stat warn"><div class="n">${pending}</div><div class="l">Pending${es('Pendientes')}</div></div>
+      <div class="stat pto"><div class="n">${fmtNum(ptoDays)}</div><div class="l">PTO days${es('Días de vacaciones')}</div></div>
+      <div class="stat sick"><div class="n">${fmtNum(sickDays)}</div><div class="l">Sick days${es('Días enfermedad')}</div></div>
+      <div class="stat unpaid"><div class="n">${fmtNum(unpaidDays)}</div><div class="l">Unpaid days${es('Días sin goce')}</div></div>
+    </div>
+
+    <div class="card pad">
+      <div class="sec-title"><span class="dot"></span><span>New time-off request${es('Nueva solicitud de ausencia')}</span></div>
+      <div class="field" style="margin-bottom:13px">${nameField}</div>
+      <div class="flabel">Category${es('Categoría')}</div>
+      <div class="segs" style="margin-bottom:13px; flex-wrap:wrap">
+        <div class="seg ${c==='pto'?'on-pto':''}" onclick="setCat('pto')">PTO<span class="seg-es">Vacaciones</span></div>
+        <div class="seg ${c==='sick'?'on-sick':''}" onclick="setCat('sick')">Sick<span class="seg-es">Enfermedad</span></div>
+        <div class="seg ${c==='unpaid'?'on-unpaid':''}" onclick="setCat('unpaid')">Unpaid<span class="seg-es">Sin goce</span></div>
+      </div>
+      <div class="flabel">Detail${es('Detalle')}</div>
+      <div class="segs" style="margin-bottom:13px; flex-wrap:wrap">
+        <div class="seg ${dt==='pto'?'on-pto':''}" onclick="setDetail('pto')">PTO<span class="seg-es">Vacaciones</span></div>
+        <div class="seg ${dt==='sick'?'on-sick':''}" onclick="setDetail('sick')">Sick<span class="seg-es">Enfermedad</span></div>
+        <div class="seg ${dt==='early'?'on-early':''}" onclick="setDetail('early')">Early leave<span class="seg-es">Salida temprana</span></div>
+        <div class="seg ${dt==='late'?'on-late':''}" onclick="setDetail('late')">Late coming<span class="seg-es">Llegada tarde</span></div>
+      </div>
+      <div class="flabel">Duration${es('Duración')}</div>
+      <div class="segs" style="margin-bottom:13px">
+        <div class="seg ${d==='full'?'on-dur':''}" onclick="setDur('full')">Full day(s)<span class="seg-es">Día(s) completo(s)</span></div>
+        <div class="seg ${d==='half'?'on-dur':''}" onclick="setDur('half')">Half day<span class="seg-es">Medio día</span></div>
+        <div class="seg ${d==='hourly'?'on-dur':''}" onclick="setDur('hourly')">Hourly<span class="seg-es">Por horas</span></div>
+      </div>
+      ${fields}
+      <div class="field" style="margin-top:13px"><label>Reason (optional)${es('Motivo (opcional)')}</label><input id="rReason" placeholder="e.g. personal · p. ej. asunto personal"></div>
+      ${unpaidWarn}
+      <div class="row-actions">
+        <button class="submit" onclick="submitReq()">Add request<span class="b-es">Agregar solicitud</span></button>
+        <span style="font-size:12px;color:var(--soft);line-height:1.4">${d==='hourly'?`${hpd()}h = 1 day · starts as Pending`:(d==='half'?'0.5 day · starts as Pending':'Starts as Pending')}<span class="es">${d==='hourly'?`${hpd()}h = 1 día · queda Pendiente`:'Queda Pendiente'}</span></span>
+      </div>
+    </div>
+
+    <div class="filters">
+      <select onchange="setFilter('month',this.value)">${monOpt}</select>
+      <select onchange="setFilter('person',this.value)">${perOpt}</select>
+      <select onchange="setFilter('status',this.value)">${stOpt}</select>
+      <select onchange="setFilter('detail',this.value)">${caOpt}</select>
+    </div>
+
+    <div class="list-head">
+      <div><h3>Requests<span class="es">Solicitudes</span></h3><div class="count">${list.length} shown · mostradas</div></div>
+      <div class="headbtns">
+        <button class="csv" onclick="exportRequestsCSV()">${IC.csv}<span class="txt">CSV (Excel)<span class="b-es">CSV para Excel</span></span></button>
+        <button class="export" onclick="exportExcel()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
+      </div>
+    </div>
+    <div class="card">
+      ${list.length ? list.map(r=>reqRow(r,isAdmin)).join('') : `<div class="empty">${IC.cal}<div>No requests match these filters.${es('Ninguna solicitud coincide con los filtros.')}</div></div>`}
+    </div>
+
+    <div class="note">${IC.info}<div>Category sets which balance it draws from — <b>Unpaid draws from nothing</b> (only counted). Anyone can add; only admins approve, reject, edit, or delete. Hourly uses ${hpd()} hours = 1 day.${es(`La categoría define de qué saldo se descuenta — Sin goce no descuenta nada (solo se cuenta). Solo los administradores aprueban, rechazan, editan o eliminan. ${hpd()} h = 1 día.`)}</div></div>
+  `;
+}
+
+function balanceCard(name){
+  const pA=allowanceFor(name,'pto'), pU=usageFor(name,'pto','approved'), pP=usageFor(name,'pto','pending'), pR=pA-pU;
+  const sA=allowanceFor(name,'sick'), sU=usageFor(name,'sick','approved'), sP=usageFor(name,'sick','pending'), sR=sA-sU;
+  const pct=(u,a)=> a>0?Math.min(100,Math.round(u/a*100)):0;
+  return `<div class="balwrap">
+    <div class="bal pto"><div class="cap">PTO · Vacaciones · ${curYear()}</div>
+      <div class="big">${fmtNum(pR)}<small> / ${fmtNum(pA)} left · restantes</small></div>
+      <div class="bar"><span style="width:${pct(pU,pA)}%"></span></div>
+      <div class="sub2">Used ${fmtNum(pU)} · pending ${fmtNum(pP)}<br><span class="es" style="margin:0">Usados ${fmtNum(pU)} · pendientes ${fmtNum(pP)}</span></div></div>
+    <div class="bal sick"><div class="cap">Sick · Enfermedad · ${curYear()}</div>
+      <div class="big">${fmtNum(sR)}<small> / ${fmtNum(sA)} left · restantes</small></div>
+      <div class="bar"><span style="width:${pct(sU,sA)}%"></span></div>
+      <div class="sub2">Used ${fmtNum(sU)} · pending ${fmtNum(sP)}<br><span class="es" style="margin:0">Usados ${fmtNum(sU)} · pendientes ${fmtNum(sP)}</span></div></div>
+  </div>`;
+}
+
+function locBadge(rec){
+  if(rec.lat==null || rec.lng==null) return `<span class="locbadge loc-no">No location</span>`;
+  if(rec.distance_m==null) return `<a class="locbadge loc-no maplink" href="https://maps.google.com/?q=${rec.lat},${rec.lng}" target="_blank">Map (no office set)</a>`;
+  const on=rec.distance_m<=officeRadius();
+  return `<a class="locbadge ${on?'loc-on':'loc-off'} maplink" href="https://maps.google.com/?q=${rec.lat},${rec.lng}" target="_blank">${on?'On-site':'Off-site'} ${rec.distance_m}m</a>`;
+}
+function punchCard(name){
+  const day=punchesFor(name, today());
+  const done=day.map(p=>p.kind);
+  const nextIdx=PUNCH.findIndex(p=>!done.includes(p.k));
+  const cells=PUNCH.map((p,i)=>{
+    const rec=day.find(x=>x.kind===p.k);
+    if(rec){ return `<div class="pbtn done"><div class="pk">${p.en}<span class="es">${p.es}</span></div><div class="ph">${fmtT(rec.punched_at)}</div>${locBadge(rec)}</div>`; }
+    if(i===nextIdx){ return `<div class="pbtn todo" onclick="doPunch('${p.k}')"><div class="pk">${p.en}<span class="es">${p.es}</span></div><div class="ph">Tap to punch</div></div>`; }
+    return `<div class="pbtn wait"><div class="pk">${p.en}<span class="es">${p.es}</span></div><div class="ph">—</div></div>`;
+  }).join('');
+  const hrs=workHours(day); const target=8;
+  const hrsTxt = hrs>0 ? `<div class="worktotal"><b>${hrs.toFixed(2)}h</b><span>/ ${target}h worked today · trabajadas hoy${hrs>target?` · +${(hrs-target).toFixed(2)}h`:''}</span></div>` : '';
+  const off=officeLoc();
+  return `<div class="card pad punchcard">
+    <div class="sec-title"><span class="dot"></span><span>Punch clock · ${fmtDate(today())}${es('Reloj de fichaje')}</span></div>
+    <div class="punchgrid">${cells}</div>
+    ${hrsTxt}
+    ${off?'':`<div class="warnbox" style="margin-top:12px">${IC.info}<div>Office location isn't set yet — punches save time but can't show on-site distance. Ask your admin.${es('La ubicación de la oficina no está configurada.')}</div></div>`}
+  </div>`;
+}
+
+/* ---------- Punch view (admin) ---------- */
+function punchDaySummary(name,date){
+  const day=state.punches.filter(p=>p.name===name && p.work_date===date);
+  const get=k=>day.find(x=>x.kind===k);
+  const dists=day.filter(p=>p.distance_m!=null).map(p=>p.distance_m);
+  const anyOff = dists.some(d=>d>officeRadius());
+  const anyNo = day.some(p=>p.lat==null);
+  const maxD = dists.length?Math.max(...dists):null;
+  return { day, get, hrs:workHours(day), anyOff, anyNo, maxD };
+}
+function viewPunch(){
+  const off=officeLoc();
+  const names=canPunchNames();
+  // collect name+date pairs
+  const pairs=[]; const seen=new Set();
+  state.punches.forEach(p=>{ if(!names.includes(p.name)) return; const key=p.name+'|'+p.work_date; if(!seen.has(key)){ seen.add(key); pairs.push({name:p.name, date:p.work_date}); } });
+  pairs.sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+  const rows=pairs.map(({name,date})=>{
+    const s=punchDaySummary(name,date);
+    const cell=k=>{ const r=s.get(k); return r?`${fmtT(r.punched_at)}${r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:''}`:'<span style="color:var(--faint)">—</span>'; };
+    const loc = s.anyNo ? `<span class="locbadge loc-no">Some no-loc</span>` : (s.maxD==null?`<span class="locbadge loc-no">—</span>`:(s.anyOff?`<span class="locbadge loc-off">Off-site ${s.maxD}m</span>`:`<span class="locbadge loc-on">On-site ≤${s.maxD}m</span>`));
+    return `<tr>
+      <td class="name">${esc(name)}</td><td style="white-space:nowrap">${fmtDate(date)}</td>
+      <td>${cell('morning_in')}</td><td>${cell('lunch_out')}</td><td>${cell('lunch_in')}</td><td>${cell('off_out')}</td>
+      <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${loc}</td>
+      <td><button class="act del" style="width:30px;height:30px" title="Delete day" onclick="delPunchDay('${esc(name)}','${date}')">${IC.trash}</button></td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="sec-title"><span class="dot"></span><span>Office location${es('Ubicación de la oficina')}</span></div>
+      <div class="default-allow">
+        <div class="field"><label>Latitude${es('Latitud')}</label><input type="number" step="0.000001" value="${esc(state.settings.office_lat||'')}" onchange="setDefault('office_lat',this.value)"></div>
+        <div class="field"><label>Longitude${es('Longitud')}</label><input type="number" step="0.000001" value="${esc(state.settings.office_lng||'')}" onchange="setDefault('office_lng',this.value)"></div>
+        <div class="field"><label>Radius (m)${es('Radio (m)')}</label><input type="number" min="10" step="10" value="${esc(state.settings.office_radius||'200')}" onchange="setDefault('office_radius',this.value)"></div>
+        <button class="submit" onclick="useCurrentOffice()" style="padding:11px 16px">Use current location<span class="b-es">Usar ubicación actual</span></button>
+      </div>
+      <div style="font-size:12px;color:var(--soft);margin-top:10px;line-height:1.5">${off?`Office set. Punches within ${officeRadius()}m show as On-site.`:'Not set. Open this page at the office and tap "Use current location".'} Phone GPS is accurate to a few meters; laptops can be off by hundreds.<span class="es" style="margin-top:2px">${off?`Configurada. Fichajes dentro de ${officeRadius()}m se marcan On-site.`:'Sin configurar. Abre esta página en la oficina y toca "Usar ubicación actual".'}</span></div>
+    </div>
+    <div class="list-head"><div><h3>Punch records<span class="es">Registros de fichaje</span></h3><div class="count">${names.length} tracked · ${pairs.length} days</div></div>
+      <div class="headbtns">
+        <button class="csv" onclick="exportPunchesCSV()">${IC.csv}<span class="txt">CSV (Excel)<span class="b-es">CSV para Excel</span></span></button>
+        <button class="export" onclick="exportPunchesXLSX()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
+      </div></div>
+    <div class="card"><div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Hours</th><th>Location</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="9" style="text-align:center;color:var(--soft);padding:30px">No punches yet · Sin fichajes</td></tr>`}</tbody>
+    </table></div></div>
+    <div class="note">${IC.info}<div>Enable who can punch in <b>Balances</b> (Punch column). Location is a reference, not exact — set a generous radius. Hours = (Lunch Out − Morning In) + (Off Out − Lunch In).${es('Activa quién puede fichar en Saldos. La ubicación es referencial. Horas = (Salida almuerzo − Entrada) + (Salida − Regreso almuerzo).')}</div></div>
+  `;
+}
+function punchExportRows(){
+  const names=canPunchNames();
+  return state.punches.filter(p=>names.includes(p.name)).slice().sort((a,b)=> new Date(a.punched_at)-new Date(b.punched_at)).map(p=>({
+    'Name':p.name,'Date':p.work_date,'Punch':PK[p.kind]?PK[p.kind].en:p.kind,'Time':fmtT(p.punched_at),
+    'Latitude':p.lat!=null?p.lat:'','Longitude':p.lng!=null?p.lng:'','Accuracy (m)':p.accuracy!=null?p.accuracy:'',
+    'Distance from office (m)':p.distance_m!=null?p.distance_m:'','On-site':p.distance_m!=null?(p.distance_m<=officeRadius()?'Yes':'No'):'',
+    'Map':(p.lat!=null?`https://maps.google.com/?q=${p.lat},${p.lng}`:'')
+  }));
+}
+function exportPunchesCSV(){ const rows=punchExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; } downloadCSV(`Punches_${today()}.csv`, toCSV(rows)); toast('CSV downloaded<span class="b-es">CSV descargado</span>'); }
+function exportPunchesXLSX(){
+  if(typeof XLSX==='undefined'){ toast('Excel module still loading'); return; }
+  const rows=punchExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; }
+  const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[{wch:14},{wch:12},{wch:13},{wch:11},{wch:12},{wch:12},{wch:11},{wch:20},{wch:8},{wch:34}];
+  XLSX.utils.book_append_sheet(wb,ws,'Punches'); XLSX.writeFile(wb,`Punches_${today()}.xlsx`);
+  toast('Excel downloaded<span class="b-es">Excel descargado</span>');
+}
+
+function reqRow(r,isAdmin){
+  const catB=CAT[r.cat]||CAT.pto, detB=DETAIL[r.detail], st=STATUS[r.status]||STATUS.pending;
+  const showDet = detB && detB.label!==catB.label;
+  let dateLine, amount;
+  if(r.dur==='hourly'){
+    dateLine = `${fmtDate(r.start)} · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime, r.hours))}`;
+    amount = `${r.hours}h (${fmtNum(r.days)} day)`;
+  } else if(r.dur==='half'){
+    dateLine = `${fmtDate(r.start)} · Half day`;
+    amount = `${fmtNum(r.days)} day`;
+  } else {
+    dateLine = r.start===r.end?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`;
+    amount = `${fmtNum(r.days)} day${(+r.days)===1?'':'s'}`;
+  }
+  const reviewed = r.reviewedBy ? ` · ${st.en} by ${esc(r.reviewedBy)}` : '';
+  const edited = r.editedBy ? ` · edited by ${esc(r.editedBy)}` : '';
+  return `<div class="req">
+    <div class="badges">
+      <span class="badge ${catB.cls}">${catB.label}<span class="es">${catB.es}</span></span>
+      ${showDet?`<span class="badge ${detB.cls}">${detB.label}<span class="es">${detB.es}</span></span>`:''}
+      <span class="sbadge" style="color:${st.c};background:${st.bg}">${st.en} · ${st.es}</span>
+    </div>
+    <div class="req-main">
+      <div class="req-top"><span class="req-name">${esc(r.name)}</span><span class="req-days">· ${amount}</span></div>
+      <div class="req-dates">${dateLine}</div>
+      ${r.reason?`<div class="req-reason">${esc(r.reason)}</div>`:''}
+      <div class="req-meta">Submitted / Enviado ${fmtDT(r.createdAt)}${r.by?` · ${esc(r.by)}`:''}${reviewed}${edited}</div>
+    </div>
+    ${isAdmin?`<div class="acts">
+      <button class="act ok ${r.status==='approved'?'on':''}" title="Approve · Aprobar" onclick="setStatus('${r.id}','approved')">${IC.check}</button>
+      <button class="act no ${r.status==='rejected'?'on':''}" title="Reject · Rechazar" onclick="setStatus('${r.id}','rejected')">${IC.x}</button>
+      <button class="act edit" title="Edit · Editar" onclick="openEdit('${r.id}')">${IC.pencil}</button>
+      <button class="act del" title="Delete · Eliminar" onclick="delReq('${r.id}')">${IC.trash}</button>
+    </div>`:''}
+  </div>`;
+}
+
+/* ---------- Balances view (admin) ---------- */
+function viewBalances(){
+  _names=allEmployeeNames();
+  const rows=_names.map((n,i)=>{
+    const pA=allowanceFor(n,'pto'), pU=usageFor(n,'pto','approved'), pR=pA-pU;
+    const sA=allowanceFor(n,'sick'), sU=usageFor(n,'sick','approved'), sR=sA-sU;
+    const uU=usageFor(n,'unpaid','approved');
+    const ov=state.employees[n]||{};
+    const inRoster=Object.prototype.hasOwnProperty.call(state.employees,n);
+    const pv=ov.pto_allowance!=null?ov.pto_allowance:'', sv=ov.sick_allowance!=null?ov.sick_allowance:'';
+    return `<tr>
+      <td class="name">${esc(n)}${inRoster?'':' <span style="font-size:10px;color:var(--faint)">(not on roster)</span>'}</td>
+      <td><input type="number" min="0" step="0.5" value="${pv}" placeholder="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setAllowanceByIdx(${i},'pto',this.value)"></td>
+      <td>${fmtNum(pU)}</td><td class="${pR<=2?'rem-low':'rem-ok'}">${fmtNum(pR)}</td>
+      <td><input type="number" min="0" step="0.5" value="${sv}" placeholder="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setAllowanceByIdx(${i},'sick',this.value)"></td>
+      <td>${fmtNum(sU)}</td><td class="${sR<=1?'rem-low':'rem-ok'}">${fmtNum(sR)}</td>
+      <td>${fmtNum(uU)}</td>
+      <td style="text-align:center">${inRoster ? `<input type="checkbox" ${state.employees[n].can_punch?'checked':''} onchange="setPunchByIdx(${i}, this.checked)" style="width:auto;cursor:pointer">` : ''}</td>
+      <td>${inRoster ? `<input type="text" value="${esc(state.codes[n]!=null?state.codes[n]:'')}" placeholder="set code" style="width:96px" onchange="setCodeByIdx(${i},this.value)">` : `<span style="color:var(--faint);font-size:11px">—</span>`}</td>
+      <td>${inRoster
+        ? `<button class="act del" style="width:30px;height:30px" title="Remove from roster · Quitar" onclick="removeEmployee(${i})">${IC.x}</button>`
+        : `<button class="ghost" style="padding:5px 8px;font-size:11px;white-space:nowrap" title="Add to roster" onclick="addToRosterByIdx(${i})">+ roster</button>`}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="sec-title"><span class="dot"></span><span>Team roster${es('Lista del equipo')}</span></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end">
+        <div class="field" style="margin:0; flex:1; min-width:200px"><label>Add employee (exact name)${es('Agregar empleado (nombre exacto)')}</label><input id="newEmp" placeholder="e.g. Maria Lopez" onkeydown="if(event.key==='Enter')addEmployee()"></div>
+        <button class="submit" onclick="addEmployee()" style="padding:12px 20px">Add<span class="b-es">Agregar</span></button>
+      </div>
+      <div style="font-size:12px;color:var(--soft);margin-top:10px;line-height:1.5">${rosterNames().length} on the roster. Give each person a <b>Login code</b> in the table below — employees log in with that code only (their name is never shown in a list).<span class="es" style="margin-top:2px">${rosterNames().length} en la lista. Asigna un código de acceso a cada uno abajo; los empleados inician sesión solo con ese código.</span></div>
+    </div>
+    <div class="card pad" style="margin-bottom:16px">
+      <div class="sec-title"><span class="dot"></span><span>Defaults${es('Valores predeterminados')}</span></div>
+      <div class="default-allow">
+        <div class="field"><label>PTO days/yr${es('Vacaciones/año')}</label><input type="number" min="0" step="0.5" value="${fmtNum(+state.settings.pto_allowance||0)}" onchange="setDefault('pto_allowance',this.value)"></div>
+        <div class="field"><label>Sick days/yr${es('Enfermedad/año')}</label><input type="number" min="0" step="0.5" value="${fmtNum(+state.settings.sick_allowance||0)}" onchange="setDefault('sick_allowance',this.value)"></div>
+        <div class="field"><label>Hours / work day${es('Horas / jornada')}</label><input type="number" min="1" step="1" value="${fmtNum(hpd())}" onchange="setDefault('hours_per_day',this.value)"></div>
+        <span style="font-size:12px;color:var(--soft);line-height:1.4;max-width:230px">Hours/day converts hourly requests into days.<span class="es">Horas/jornada convierte las solicitudes por horas en días.</span></span>
+      </div>
+    </div>
+    <div class="list-head"><div><h3>Balances ${curYear()}<span class="es">Saldos ${curYear()}</span></h3><div class="count">Used = approved this year · Usados = aprobados este año</div></div>
+      <div class="headbtns">
+        <button class="csv" onclick="exportBalancesCSV()">${IC.csv}<span class="txt">CSV (Excel)<span class="b-es">CSV para Excel</span></span></button>
+        <button class="export" onclick="exportExcel()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
+      </div></div>
+    <div class="card"><div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Name / Nombre</th><th>PTO allow.<br>asign.</th><th>PTO used<br>usados</th><th>PTO left<br>restan</th><th>Sick allow.<br>asign.</th><th>Sick used<br>usados</th><th>Sick left<br>restan</th><th>Unpaid used<br>sin goce</th><th>Punch<br>fichaje</th><th>Login code<br>código</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="11" style="text-align:center;color:var(--soft);padding:30px">No employees yet — add someone above · Aún no hay empleados</td></tr>`}</tbody>
+    </table></div></div>
+    <div class="note">${IC.info}<div>Add your team above, then set each person's <b>Login code</b>. Employees sign in with that code — names are never listed at login. Leave allowance cells blank to use the default.${es('Agrega a tu equipo y asigna un código a cada uno. Los empleados inician sesión con ese código; los nombres no se muestran. Deja las celdas vacías para usar el valor predeterminado.')}</div></div>
+  `;
+}
+
+/* ---------- Audit view (admin) ---------- */
+function viewAudit(){
+  const ACT={ approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
+  const rows=(state.audit||[]).map(a=>{ const m=ACT[a.action]||{en:a.action,c:'var(--soft)'};
+    return `<tr><td style="white-space:nowrap"><span class="sbadge" style="color:${m.c};background:var(--line-2)">${m.en}</span></td><td>${esc(a.detail||'')}</td><td style="white-space:nowrap">${esc(a.actor||'')}</td><td style="white-space:nowrap;color:var(--soft)">${fmtDT(a.created_at)}</td></tr>`;
+  }).join('');
+  return `
+    <div class="list-head"><div><h3>Audit log<span class="es">Registro de auditoría</span></h3><div class="count">Admin actions · last 200 · últimas 200</div></div></div>
+    <div class="card"><div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Action / Acción</th><th>Detail / Detalle</th><th>Admin</th><th>When / Cuándo</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:var(--soft);padding:30px">No activity yet · Sin actividad</td></tr>`}</tbody>
+    </table></div></div>
+    <div class="note">${IC.info}<div>Records admin actions only. Deleted requests keep a summary line here.${es('Registra solo acciones de administradores. Las solicitudes eliminadas dejan un resumen aquí.')}</div></div>
+  `;
+}
+
+/* ============ boot ============ */
+(async function(){
+  if(!CONFIGURED){ render(); return; }
+  try{ await Promise.all([loadSettings(), loadEmployees()]); }catch(e){ console.error(e); }
+  try{ const { data:{ session } } = await db.auth.getSession(); if(session){ state.role='admin'; state.user=session.user.email; return enterDash(); } }catch(e){ console.error(e); }
+  const emp=lsGet('pto_emp');
+  if(emp && rosterNames().includes(emp)){ state.role='employee'; state.user=emp; return enterDash(); }
+  if(emp) lsDel('pto_emp'); // stored name no longer on the roster
+  state.screen='login'; render();
+})();
+</script>
