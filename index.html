@@ -32,7 +32,7 @@
   :root{
     --bg:#EEF3F4; --surface:#FFFFFF; --ink:#17242B; --soft:#5D6E76; --faint:#94A2A9;
     --line:#DCE4E7; --line-2:#EAEFF1;
-    --pto:#DC2228; --pto-bg:#FBE7E7;
+    --pto:#1C6E7B; --pto-bg:#E3F0F2;   /* calm teal main; red stays in logo + danger */
     --sick:#CC7A22; --sick-bg:#FBEBD8;
     --half:#5F6FC0; --half-bg:#E7EAF7;
     --early:#4C86B8; --early-bg:#E1EEF6; --late:#B0568A; --late-bg:#F6E6EF;
@@ -135,6 +135,9 @@
   .stat .l{font-size:11.5px; color:var(--soft); margin-top:7px; font-weight:500}
   .stat .l .es{margin-top:1px}
   .stat.pto .n{color:var(--pto)} .stat.sick .n{color:var(--sick)} .stat.warn .n{color:var(--warnc)} .stat.unpaid .n{color:var(--unpaid)}
+  .stat.click{cursor:pointer; transition:.12s; user-select:none}
+  .stat.click:hover{border-color:var(--soft)}
+  .stat.on{border-color:var(--pto); box-shadow:0 0 0 2px var(--pto-bg)}
 
   .balwrap{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px}
   .bal{border-radius:14px; padding:16px 17px; border:1px solid var(--line); background:var(--surface)}
@@ -268,7 +271,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null,
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null,
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -305,7 +308,9 @@ function canPunchNames(){ return Object.keys(state.employees).filter(n=>state.em
 
 /* ============ helpers ============ */
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-const es=(t)=>`<span class="es">${t}</span>`;
+const es=(t)=> state.role==='admin' ? '' : `<span class="es">${t}</span>`;
+function bl(en, esT){ return state.role==='admin' ? en : `${en} · ${esT}`; }
+function blslash(en, esT){ return state.role==='admin' ? en : `${en} / ${esT}`; }
 function jsq(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function val(id){ const el=document.getElementById(id); return el?el.value:''; }
 function setErr(en,esT){ const e=document.getElementById('err'); if(e) e.innerHTML=`${en}<span class="es" style="margin-top:2px">${esT}</span>`; }
@@ -678,13 +683,18 @@ function exportExcel(){
 }
 
 /* ============ filtering ============ */
+function toggleQuick(v){ state.quick = (v==null) ? null : (state.quick===v?null:v); render(); }
 function filteredRequests(){
-  const f=state.filter;
+  const f=state.filter, q=state.quick;
   return state.requests.filter(r=>{
     if(f.person!=='all' && r.name!==f.person) return false;
     if(f.status!=='all' && r.status!==f.status) return false;
     if(f.detail!=='all' && r.detail!==f.detail) return false;
     if(f.month!=='all' && (r.start||'').slice(0,7)!==f.month) return false;
+    if(q==='pending' && r.status!=='pending') return false;
+    if(q==='pto' && r.cat!=='pto') return false;
+    if(q==='sick' && r.cat!=='sick') return false;
+    if(q==='unpaid' && r.cat!=='unpaid') return false;
     return true;
   });
 }
@@ -777,7 +787,24 @@ function renderDash(app){
     </div>`:''}
     ${body}
     ${(isAdmin && state.editing)?editModal():''}
+    ${(isAdmin && state.punchEdit)?punchEditModal():''}
     ${state.detailReq?reqDetailModal():''}`;
+}
+
+function punchEditModal(){
+  const p=state.punchEdit; if(!p) return '';
+  const cur=new Date(p.punched_at); const hh=String(cur.getHours()).padStart(2,'0'), mm=String(cur.getMinutes()).padStart(2,'0');
+  return `<div class="overlay" onclick="if(event.target===this)closePunchEdit()"><div class="modal">
+    <h3>${IC.pencil} Correct punch<span class="es-h">Corregir fichaje</span></h3>
+    <div class="msub">${esc(p.name)} · ${fmtDate(p.work_date)} · ${PK[p.kind]?PK[p.kind].en:p.kind}</div>
+    <div class="field"><label>New time${es('Nueva hora')}</label><input id="peTime" type="time" value="${hh}:${mm}"></div>
+    <div class="field"><label>Reason — required${es('Motivo — obligatorio')}</label><input id="peNote" placeholder="e.g. employee forgot to punch out · p. ej. olvidó fichar"></div>
+    <div class="modal-actions">
+      <button class="save" onclick="savePunchEdit()">Save<span class="b-es">Guardar</span></button>
+      <button class="cancel" onclick="closePunchEdit()">Cancel<span class="es">Cancelar</span></button>
+    </div>
+    ${p.edited_by?`<div style="font-size:11px;color:var(--faint);margin-top:10px">Last edited by ${esc(p.edited_by)}${p.edit_note?` · "${esc(p.edit_note)}"`:''}</div>`:''}
+  </div></div>`;
 }
 
 function reqDetailModal(){
@@ -790,15 +817,15 @@ function reqDetailModal(){
   else if(r.dur==='half') when=`${fmtDate(r.start)}${r.startTime?` · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime,hpd()/2))}`:''} · Half day`;
   else when = r.start===r.end?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`;
   const rows=[
-    ['Employee · Empleado', esc(r.name)],
-    ['Category · Categoría', catB.label],
-    ['Detail · Detalle', (detB?detB.label:catB.label)],
-    ['When · Cuándo', when],
-    ['Amount · Cantidad', `${fmtNum(r.days)} day(s) · día(s)`],
-    r.reason?['Reason · Motivo', esc(r.reason)]:null,
-    ['Submitted · Enviado', fmtDT(r.createdAt)+(r.by?` · ${esc(r.by)}`:'')],
-    r.reviewedBy?['Reviewed by · Revisado', `${esc(r.reviewedBy)}`+(r.reviewedAt?` · ${fmtDT(r.reviewedAt)}`:'')]:null,
-    r.editedBy?['Edited by · Editado', `${esc(r.editedBy)}`+(r.editedAt?` · ${fmtDT(r.editedAt)}`:'')]:null
+    [bl('Employee','Empleado'), esc(r.name)],
+    [bl('Category','Categoría'), catB.label],
+    [bl('Detail','Detalle'), (detB?detB.label:catB.label)],
+    [bl('When','Cuándo'), when],
+    [bl('Amount','Cantidad'), `${fmtNum(r.days)} ${bl('day(s)','día(s)')}`],
+    r.reason?[bl('Reason','Motivo'), esc(r.reason)]:null,
+    [bl('Submitted','Enviado'), fmtDT(r.createdAt)+(r.by?` · ${esc(r.by)}`:'')],
+    r.reviewedBy?[bl('Reviewed by','Revisado'), `${esc(r.reviewedBy)}`+(r.reviewedAt?` · ${fmtDT(r.reviewedAt)}`:'')]:null,
+    r.editedBy?[bl('Edited by','Editado'), `${esc(r.editedBy)}`+(r.editedAt?` · ${fmtDT(r.editedAt)}`:'')]:null
   ].filter(Boolean);
   return `<div class="overlay" onclick="if(event.target===this)closeReqDetail()"><div class="modal">
     <h3>${IC.info} Request details<span class="es-h">Detalles de la solicitud</span></h3>
@@ -903,10 +930,10 @@ function viewRequests(isAdmin){
 
   const months=[...new Set(state.requests.map(r=>(r.start||'').slice(0,7)).filter(Boolean))].sort().reverse();
   const persons=[...new Set(state.requests.map(r=>r.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-  const monOpt=`<option value="all">All months · Todos los meses</option>`+months.map(m=>{const[y,mm]=m.split('-');return `<option value="${m}" ${state.filter.month===m?'selected':''}>${MON[+mm-1]} ${y}</option>`;}).join('');
-  const perOpt=`<option value="all">All people · Todas las personas</option>`+persons.map(p=>`<option value="${esc(p)}" ${state.filter.person===p?'selected':''}>${esc(p)}</option>`).join('');
-  const stOpt=`<option value="all">All status · Todos</option>`+['pending','approved','rejected','cancelled'].map(s=>`<option value="${s}" ${state.filter.status===s?'selected':''}>${STATUS[s].en} · ${STATUS[s].es}</option>`).join('');
-  const caOpt=`<option value="all">All types · Todos</option>`+['pto','sick','early','late'].map(k=>`<option value="${k}" ${state.filter.detail===k?'selected':''}>${DETAIL[k].label} · ${DETAIL[k].es}</option>`).join('');
+  const monOpt=`<option value="all">${bl('All months','Todos los meses')}</option>`+months.map(m=>{const[y,mm]=m.split('-');return `<option value="${m}" ${state.filter.month===m?'selected':''}>${MON[+mm-1]} ${y}</option>`;}).join('');
+  const perOpt=`<option value="all">${bl('All people','Todas las personas')}</option>`+persons.map(p=>`<option value="${esc(p)}" ${state.filter.person===p?'selected':''}>${esc(p)}</option>`).join('');
+  const stOpt=`<option value="all">${bl('All status','Todos')}</option>`+['pending','approved','rejected','cancelled'].map(s=>`<option value="${s}" ${state.filter.status===s?'selected':''}>${bl(STATUS[s].en,STATUS[s].es)}</option>`).join('');
+  const caOpt=`<option value="all">${bl('All types','Todos')}</option>`+['pto','sick','early','late'].map(k=>`<option value="${k}" ${state.filter.detail===k?'selected':''}>${bl(DETAIL[k].label,DETAIL[k].es)}</option>`).join('');
 
   let fields;
   if(d==='full'){
@@ -929,11 +956,11 @@ function viewRequests(isAdmin){
     ${punchHtml}
     ${balHtml}
     <div class="stats">
-      <div class="stat"><div class="n">${list.length}</div><div class="l">Shown requests${es('Solicitudes mostradas')}</div></div>
-      <div class="stat warn"><div class="n">${pending}</div><div class="l">Pending${es('Pendientes')}</div></div>
-      <div class="stat pto"><div class="n">${fmtNum(ptoDays)}</div><div class="l">PTO days${es('Días de vacaciones')}</div></div>
-      <div class="stat sick"><div class="n">${fmtNum(sickDays)}</div><div class="l">Sick days${es('Días enfermedad')}</div></div>
-      <div class="stat unpaid"><div class="n">${fmtNum(unpaidDays)}</div><div class="l">Unpaid days${es('Días sin goce')}</div></div>
+      <div class="stat click ${state.quick===null?'':''}" onclick="toggleQuick(null)"><div class="n">${list.length}</div><div class="l">Shown requests${es('Solicitudes mostradas')}</div></div>
+      <div class="stat warn click ${state.quick==='pending'?'on':''}" onclick="toggleQuick('pending')"><div class="n">${pending}</div><div class="l">Pending${es('Pendientes')}</div></div>
+      <div class="stat pto click ${state.quick==='pto'?'on':''}" onclick="toggleQuick('pto')"><div class="n">${fmtNum(ptoDays)}</div><div class="l">PTO days${es('Días de vacaciones')}</div></div>
+      <div class="stat sick click ${state.quick==='sick'?'on':''}" onclick="toggleQuick('sick')"><div class="n">${fmtNum(sickDays)}</div><div class="l">Sick days${es('Días enfermedad')}</div></div>
+      <div class="stat unpaid click ${state.quick==='unpaid'?'on':''}" onclick="toggleQuick('unpaid')"><div class="n">${fmtNum(unpaidDays)}</div><div class="l">Unpaid days${es('Días sin goce')}</div></div>
     </div>
 
     <div class="card pad">
@@ -1023,11 +1050,17 @@ function punchCard(name){
   }).join('');
   const hrs=workHours(day); const target=8;
   const hrsTxt = hrs>0 ? `<div class="worktotal"><b>${hrs.toFixed(2)}h</b><span>/ ${target}h worked today · trabajadas hoy${hrs>target?` · +${(hrs-target).toFixed(2)}h`:''}</span></div>` : '';
+  const notes=notesFor(name, today());
+  const notesHtml=`<div style="margin-top:12px">
+    ${notes.map(n=>`<div style="font-size:12px;color:var(--soft);padding:7px 0;border-top:1px solid var(--line-2)">💬 ${esc(n.note)}<span style="color:var(--faint)"> · ${fmtT(n.created_at)}${n.by_role==='admin'?' · admin':''}</span></div>`).join('')}
+    <button class="ghost" style="margin-top:10px;padding:9px 13px;font-size:12.5px" onclick="addPunchNote('${jsq(name)}','${today()}')">+ Add comment${es('Agregar comentario')}</button>
+  </div>`;
   const off=officeLoc();
   return `<div class="card pad punchcard">
     <div class="sec-title"><span class="dot"></span><span>Punch clock · ${fmtDate(today())}${es('Reloj de fichaje')}</span></div>
     <div class="punchgrid">${cells}</div>
     ${hrsTxt}
+    ${notesHtml}
     ${off?'':`<div class="warnbox" style="margin-top:12px">${IC.info}<div>Office location isn't set yet — punches save time but can't show on-site distance. Ask your admin.${es('La ubicación de la oficina no está configurada.')}</div></div>`}
   </div>`;
 }
@@ -1051,13 +1084,17 @@ function viewPunch(){
   pairs.sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
   const rows=pairs.map(({name,date})=>{
     const s=punchDaySummary(name,date);
-    const cell=k=>{ const r=s.get(k); return r?`${fmtT(r.punched_at)}${r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:''}`:'<span style="color:var(--faint)">—</span>'; };
+    const cell=k=>{ const r=s.get(k); if(!r) return '<span style="color:var(--faint)">—</span>';
+      const mapl=r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:'';
+      const ed=r.edited_by?' <span title="edited" style="color:var(--half)">✎</span>':'';
+      return `<button class="ghost" style="padding:5px 8px;font-size:12px" title="Edit (reason required)" onclick="openPunchEdit('${r.id}')">${fmtT(r.punched_at)}</button>${mapl}${ed}`; };
     const loc = s.anyNo ? `<span class="locbadge loc-no">Some no-loc</span>` : (s.maxD==null?`<span class="locbadge loc-no">—</span>`:(s.anyOff?`<span class="locbadge loc-off">Off-site ${s.maxD}m</span>`:`<span class="locbadge loc-on">On-site ≤${s.maxD}m</span>`));
+    const dn=notesFor(name,date);
+    const notesCell = `${dn.length?dn.map(n=>`<div style="font-size:11px;color:var(--soft)">💬 ${esc(n.note)}</div>`).join(''):''}<button class="ghost" style="padding:4px 8px;font-size:11px;margin-top:${dn.length?'4px':'0'}" onclick="addPunchNote('${jsq(name)}','${date}')">+ note</button>`;
     return `<tr>
       <td class="name">${esc(name)}</td><td style="white-space:nowrap">${fmtDate(date)}</td>
       <td>${cell('morning_in')}</td><td>${cell('lunch_out')}</td><td>${cell('lunch_in')}</td><td>${cell('off_out')}</td>
-      <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${loc}</td>
-      <td><button class="act del" style="width:30px;height:30px" title="Delete day" onclick="delPunchDay('${esc(name)}','${date}')">${IC.trash}</button></td>
+      <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${loc}</td><td style="min-width:120px">${notesCell}</td>
     </tr>`;
   }).join('');
   return `
@@ -1077,10 +1114,10 @@ function viewPunch(){
         <button class="export" onclick="exportPunchesXLSX()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
       </div></div>
     <div class="card"><div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Hours</th><th>Location</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Hours</th><th>Location</th><th>Comments</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="9" style="text-align:center;color:var(--soft);padding:30px">No punches yet · Sin fichajes</td></tr>`}</tbody>
     </table></div></div>
-    <div class="note">${IC.info}<div>Enable who can punch in <b>Balances</b> (Punch column). Location is a reference, not exact — set a generous radius. Hours = (Lunch Out − Morning In) + (Off Out − Lunch In).${es('Activa quién puede fichar en Saldos. La ubicación es referencial. Horas = (Salida almuerzo − Entrada) + (Salida − Regreso almuerzo).')}</div></div>
+    <div class="note">${IC.info}<div>Tap a time to correct a punch — a reason is required and is logged. Punches are never deleted. Enable who can punch in <b>Balances</b>. Hours = (Lunch Out − Morning In) + (Off Out − Lunch In).${es('Toca una hora para corregir un fichaje — se exige un motivo y queda registrado. Los fichajes nunca se eliminan.')}</div></div>
   `;
 }
 function punchExportRows(){
@@ -1089,6 +1126,7 @@ function punchExportRows(){
     'Name':p.name,'Date':p.work_date,'Punch':PK[p.kind]?PK[p.kind].en:p.kind,'Time':fmtT(p.punched_at),
     'Latitude':p.lat!=null?p.lat:'','Longitude':p.lng!=null?p.lng:'','Accuracy (m)':p.accuracy!=null?p.accuracy:'',
     'Distance from office (m)':p.distance_m!=null?p.distance_m:'','On-site':p.distance_m!=null?(p.distance_m<=officeRadius()?'Yes':'No'):'',
+    'Edited by':p.edited_by||'','Edit reason':p.edit_note||'',
     'Map':(p.lat!=null?`https://maps.google.com/?q=${p.lat},${p.lng}`:'')
   }));
 }
@@ -1123,13 +1161,13 @@ function reqRow(r,isAdmin){
     <div class="badges">
       <span class="badge ${catB.cls}">${catB.label}<span class="es">${catB.es}</span></span>
       ${showDet?`<span class="badge ${detB.cls}">${detB.label}<span class="es">${detB.es}</span></span>`:''}
-      <span class="sbadge" style="color:${st.c};background:${st.bg}">${st.en} · ${st.es}</span>
+      <span class="sbadge" style="color:${st.c};background:${st.bg}">${bl(st.en,st.es)}</span>
     </div>
     <div class="req-main">
       <div class="req-top"><span class="req-name">${esc(r.name)}</span><span class="req-days">· ${amount}</span></div>
       <div class="req-dates">${dateLine}</div>
       ${r.reason?`<div class="req-reason">${esc(r.reason)}</div>`:''}
-      <div class="req-meta">Submitted / Enviado ${fmtDT(r.createdAt)}${r.by?` · ${esc(r.by)}`:''}${reviewed}${edited}</div>
+      <div class="req-meta">${blslash('Submitted','Enviado')} ${fmtDT(r.createdAt)}${r.by?` · ${esc(r.by)}`:''}${reviewed}${edited}</div>
     </div>
     ${isAdmin?`<div class="acts" onclick="event.stopPropagation()">
       <button class="act ok ${r.status==='approved'?'on':''}" title="Approve · Aprobar" onclick="setStatus('${r.id}','approved')">${IC.check}</button>
@@ -1184,13 +1222,13 @@ function viewBalances(){
         <span style="font-size:12px;color:var(--soft);line-height:1.4;max-width:230px">Hours/day converts hourly requests into days.<span class="es">Horas/jornada convierte las solicitudes por horas en días.</span></span>
       </div>
     </div>
-    <div class="list-head"><div><h3>Balances ${curYear()}<span class="es">Saldos ${curYear()}</span></h3><div class="count">Used = approved this year · Usados = aprobados este año</div></div>
+    <div class="list-head"><div><h3>Balances ${curYear()}<span class="es">Saldos ${curYear()}</span></h3><div class="count">Used = approved requests dated this year</div></div>
       <div class="headbtns">
         <button class="csv" onclick="exportBalancesCSV()">${IC.csv}<span class="txt">CSV (Excel)<span class="b-es">CSV para Excel</span></span></button>
         <button class="export" onclick="exportExcel()">${IC.excel}<span class="txt">Excel .xlsx<span class="b-es">Excel .xlsx</span></span></button>
       </div></div>
     <div class="card"><div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Name / Nombre</th><th>PTO allow.<br>asign.</th><th>PTO used<br>usados</th><th>PTO left<br>restan</th><th>Sick allow.<br>asign.</th><th>Sick used<br>usados</th><th>Sick left<br>restan</th><th>Unpaid used<br>sin goce</th><th>Punch<br>fichaje</th><th>Login code<br>código</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>PTO allow.</th><th>PTO used</th><th>PTO left</th><th>Sick allow.</th><th>Sick used</th><th>Sick left</th><th>Unpaid used</th><th>Punch</th><th>Login code</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="11" style="text-align:center;color:var(--soft);padding:30px">No employees yet — add someone above · Aún no hay empleados</td></tr>`}</tbody>
     </table></div></div>
     <div class="note">${IC.info}<div>Add your team above, then set each person's <b>Login code</b>. Employees sign in with that code — names are never listed at login. Leave allowance cells blank to use the default.${es('Agrega a tu equipo y asigna un código a cada uno. Los empleados inician sesión con ese código; los nombres no se muestran. Deja las celdas vacías para usar el valor predeterminado.')}</div></div>
@@ -1199,14 +1237,14 @@ function viewBalances(){
 
 /* ---------- Audit view (admin) ---------- */
 function viewAudit(){
-  const ACT={ approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
+  const ACT={ approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, cancel:{en:'Cancelled',c:'var(--soft)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, punchedit:{en:'Punch edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
   const rows=(state.audit||[]).map(a=>{ const m=ACT[a.action]||{en:a.action,c:'var(--soft)'};
     return `<tr><td style="white-space:nowrap"><span class="sbadge" style="color:${m.c};background:var(--line-2)">${m.en}</span></td><td>${esc(a.detail||'')}</td><td style="white-space:nowrap">${esc(a.actor||'')}</td><td style="white-space:nowrap;color:var(--soft)">${fmtDT(a.created_at)}</td></tr>`;
   }).join('');
   return `
-    <div class="list-head"><div><h3>Audit log<span class="es">Registro de auditoría</span></h3><div class="count">Admin actions · last 200 · últimas 200</div></div></div>
+    <div class="list-head"><div><h3>Audit log<span class="es">Registro de auditoría</span></h3><div class="count">Admin actions · last 200</div></div></div>
     <div class="card"><div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Action / Acción</th><th>Detail / Detalle</th><th>Admin</th><th>When / Cuándo</th></tr></thead>
+      <thead><tr><th>Action</th><th>Detail</th><th>Admin</th><th>When</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:var(--soft);padding:30px">No activity yet · Sin actividad</td></tr>`}</tbody>
     </table></div></div>
     <div class="note">${IC.info}<div>Records admin actions only. Deleted requests keep a summary line here.${es('Registra solo acciones de administradores. Las solicitudes eliminadas dejan un resumen aquí.')}</div></div>
