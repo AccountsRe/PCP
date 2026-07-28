@@ -378,6 +378,7 @@ async function submitReq(){
     end=val('rEnd'); if(!end) return toast('Pick an end date<span class="b-es">Elige la fecha de fin</span>');
     days=daysBetween(start,end);
   } else if(dur==='half'){
+    startTime=val('rTime'); if(!startTime) return toast('Pick a start time<span class="b-es">Elige la hora de inicio</span>');
     days=0.5;
   } else { // hourly
     startTime=val('rTime'); hours=parseInt(val('rHours'),10);
@@ -443,7 +444,7 @@ async function saveEdit(){
   if(!e.start) return toast('Pick a start date · Elige la fecha');
   let end=e.start, days=0, startTime=null, hours=null;
   if(e.dur==='full'){ end=e.end||e.start; days=daysBetween(e.start,end); }
-  else if(e.dur==='half'){ days=0.5; }
+  else if(e.dur==='half'){ startTime=e.startTime; if(!startTime) return toast('Pick a start time · Elige la hora'); days=0.5; }
   else { startTime=e.startTime; hours=parseInt(e.hours,10); if(!startTime) return toast('Pick a start time · Elige la hora'); if(!hours||hours<=0) return toast('Enter hours · Ingresa las horas'); days=Math.round((hours/hpd())*100)/100; }
   const payload={ name:e.name.trim(), type:cat, detail:e.detail, duration:e.dur, start_date:e.start, end_date:end, start_time:startTime, hours, days, reason:(e.reason&&e.reason.trim())||null, edited_at:new Date().toISOString(), edited_by:state.user };
   const { error } = await db.from('requests').update(payload).eq('id', e.id);
@@ -468,7 +469,7 @@ function downloadCSV(filename, text){
 function requestRowsForExport(){
   return filteredRequests().slice().sort((a,b)=> new Date(a.createdAt)-new Date(b.createdAt)).map(r=>({
     'Name':r.name,'Category':CAT[r.cat].label,'Detail':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration':DUR[r.dur].en,'Status':STATUS[r.status].en,
-    'Date':fmtDate(r.start),'End':(r.dur==='full'?fmtDate(r.end):''),'Start time':(r.dur==='hourly'?fmt12(r.startTime):''),
+    'Date':fmtDate(r.start),'End':(r.dur==='full'?fmtDate(r.end):''),'Start time':((r.dur==='hourly'||r.dur==='half')?fmt12(r.startTime):''),
     'Hours':(r.dur==='hourly'?r.hours:''),'Days':r.days,'Reason':r.reason||'',
     'Submitted':fmtDT(r.createdAt),'By':r.by||'','Reviewed by':r.reviewedBy||'','Edited by':r.editedBy||''
   }));
@@ -598,7 +599,7 @@ function exportExcel(){
   const rows=list.slice().sort((a,b)=> new Date(a.createdAt)-new Date(b.createdAt)).map(r=>({
     'Name / Nombre':r.name,'Category / Categoría':`${CAT[r.cat].label} (${CAT[r.cat].es})`,'Detail / Detalle':(DETAIL[r.detail]||CAT[r.cat]).label,'Duration / Duración':DUR[r.dur].en,
     'Status / Estado':STATUS[r.status].en,'Date / Fecha':fmtDate(r.start),'End / Fin':(r.dur==='full'?fmtDate(r.end):''),
-    'Start time / Hora':(r.dur==='hourly'?fmt12(r.startTime):''),'Hours / Horas':(r.dur==='hourly'?r.hours:''),
+    'Start time / Hora':((r.dur==='hourly'||r.dur==='half')?fmt12(r.startTime):''),'Hours / Horas':(r.dur==='hourly'?r.hours:''),
     'Days / Días':r.days,'Reason / Motivo':r.reason||'','Submitted / Enviado':fmtDT(r.createdAt),'By / Por':r.by||'','Reviewed by / Revisado':r.reviewedBy||''
   }));
   const wb=XLSX.utils.book_new();
@@ -730,7 +731,8 @@ function editModal(){
       <div><label>End date${es('Fecha de fin')}</label><input id="eEnd" type="date" value="${esc(e.end||e.start||today())}"></div>
     </div>`;
   } else if(d==='half'){
-    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>`;
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
+      <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="eTime" type="time" value="${esc(e.startTime||'08:00')}"></div>`;
   } else {
     fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
       <div class="grid2">
@@ -812,7 +814,8 @@ function viewRequests(isAdmin){
       <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}"></div>
     </div>`;
   } else if(d==='half'){
-    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}"></div>`;
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}"></div>
+      <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>`;
   } else {
     fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}"></div>
       <div class="grid2">
@@ -1006,7 +1009,8 @@ function reqRow(r,isAdmin){
     dateLine = `${fmtDate(r.start)} · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime, r.hours))}`;
     amount = `${r.hours}h (${fmtNum(r.days)} day)`;
   } else if(r.dur==='half'){
-    dateLine = `${fmtDate(r.start)} · Half day`;
+    const hh = r.startTime ? ` · ${fmt12(r.startTime)} → ${fmt12(addHours(r.startTime, hpd()/2))}` : '';
+    dateLine = `${fmtDate(r.start)} · Half day${hh}`;
     amount = `${fmtNum(r.days)} day`;
   } else {
     dateLine = r.start===r.end?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`;
