@@ -54,6 +54,7 @@
   .es-h{display:block; font-family:"Inter",sans-serif; font-weight:500; font-size:13.5px; color:var(--soft); margin-top:4px}
   .b-es{display:block; font-weight:500; font-size:11px; opacity:.85; margin-top:1px}
   .seg-es{display:block; font-weight:500; font-size:10.5px; opacity:.72; margin-top:2px}
+  body.admin .seg-es, body.admin .b-es{display:none}
   .tab-es{display:block; font-size:10px; font-weight:500; opacity:.7; margin-top:1px}
 
   .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; gap:12px}
@@ -322,6 +323,7 @@ function setFilter(k,v){ state.filter[k]=v; render(); }
 function clearForm(){ ['rStart','rEnd','rTime','rHours','rReason'].forEach(id=>{const el=document.getElementById(id); if(el) el.value = (id==='rHours'?'':el.value); }); const rr=document.getElementById('rReason'); if(rr) rr.value=''; }
 function fmtNum(n){ n=+n; return Number.isInteger(n)?n:n.toFixed(2).replace(/0$/,''); }
 function daysBetween(s,e){ if(!s||!e) return 1; const d=Math.round((new Date(e)-new Date(s))/864e5)+1; return d>0?d:1; }
+function businessDays(s,e){ if(!s||!e) return 0; let a=new Date(s+'T00:00:00'), b=new Date(e+'T00:00:00'); if(b<a) return 0; let n=0; const cur=new Date(a); while(cur<=b){ const wd=cur.getDay(); if(wd!==0 && wd!==6) n++; cur.setDate(cur.getDate()+1);} return n; }
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmtDate(d){ if(!d) return ''; const x=new Date(d+'T00:00:00'); return `${MON[x.getMonth()]} ${x.getDate()}, ${x.getFullYear()}`; }
 function fmtDT(v){ const x=new Date(v); let h=x.getHours(); const ap=h>=12?'PM':'AM'; h=h%12||12; return `${MON[x.getMonth()]} ${x.getDate()}, ${x.getFullYear()} ${h}:${String(x.getMinutes()).padStart(2,'0')} ${ap}`; }
@@ -406,7 +408,8 @@ async function submitReq(){
   let end=start, days=0, startTime=null, hours=null;
   if(dur==='full'){
     end=val('rEnd'); if(!end) return toast('Pick an end date<span class="b-es">Elige la fecha de fin</span>');
-    days=daysBetween(start,end);
+    days=businessDays(start,end);
+    if(days<=0) return toast('That range is all weekend<span class="b-es">Ese rango es solo fin de semana</span>');
   } else if(dur==='half'){
     startTime=val('rTime'); if(!startTime) return toast('Pick a start time<span class="b-es">Elige la hora de inicio</span>');
     days=0.5;
@@ -482,7 +485,7 @@ async function saveEdit(){
   if(!e.name || !e.name.trim()) return toast('Enter a name · Ingresa un nombre');
   if(!e.start) return toast('Pick a start date · Elige la fecha');
   let end=e.start, days=0, startTime=null, hours=null;
-  if(e.dur==='full'){ end=e.end||e.start; days=daysBetween(e.start,end); }
+  if(e.dur==='full'){ end=e.end||e.start; days=businessDays(e.start,end); if(days<=0) return toast('That range is all weekend'); }
   else if(e.dur==='half'){ startTime=e.startTime; if(!startTime) return toast('Pick a start time · Elige la hora'); days=0.5; }
   else { startTime=e.startTime; hours=parseInt(e.hours,10); if(!startTime) return toast('Pick a start time · Elige la hora'); if(!hours||hours<=0) return toast('Enter hours · Ingresa las horas'); days=Math.round((hours/hpd())*100)/100; }
   const payload={ name:e.name.trim(), type:cat, detail:e.detail, duration:e.dur, start_date:e.start, end_date:end, start_time:startTime, hours, days, reason:(e.reason&&e.reason.trim())||null, edited_at:new Date().toISOString(), edited_by:state.user };
@@ -715,6 +718,7 @@ const IC={
 /* ============ render ============ */
 function render(){
   const app=document.getElementById('app');
+  document.body.classList.toggle('admin', state.role==='admin');
   if(!CONFIGURED) return renderConfig(app);
   if(state.screen==='loading'){ app.innerHTML=`<div class="center"><div style="color:var(--soft);text-align:center">Loading…<span class="es">Cargando…</span></div></div>`; return; }
   if(state.screen==='login') return renderLogin(app);
@@ -771,12 +775,12 @@ function renderDash(app){
   app.innerHTML=`
     <div class="topbar">
       <div class="brand"><img class="brandlogo" src="${LOGO_SRC}" alt="POCAS">
-        <div><h1>PTO &amp; Sick Leave <span class="live" title="Live sync"></span></h1><p>Vacaciones y enfermedad · ${state.requests.length} total</p></div>
+        <div><h1>PTO &amp; Sick Leave <span class="live" title="Live sync"></span></h1><p>${state.role==='admin'?'':'Vacaciones y enfermedad · '}${state.requests.length} total</p></div>
       </div>
       <div class="who">
         <span><b>${esc(state.user)}</b></span>
         <span class="pill-role ${isAdmin?'admin':''}">${isAdmin?'Admin':'Employee'}${es(isAdmin?'Administrador':'Empleado')}</span>
-        <button class="ghost" onclick="logout()">Log out<span class="es">Cerrar sesión</span></button>
+        <button class="ghost" onclick="logout()">Log out${es('Cerrar sesión')}</button>
       </div>
     </div>
     ${isAdmin ? `<div class="subnav">
@@ -922,7 +926,7 @@ function viewRequests(isAdmin){
     }
   }
   const nameField = state.role==='admin'
-    ? `<label>Employee${es('Empleado')}</label><select id="rName" onchange="if(state.cat==='unpaid')render()"><option value="">— Select · Seleccionar —</option>${rosterNames().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>`
+    ? `<label>Employee${es('Empleado')}</label><select id="rName" onchange="if(state.cat==='unpaid')render()"><option value="">${bl('— Select —','— Seleccionar —')}</option>${rosterNames().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>`
     : `<label>Name${es('Nombre')}</label><input id="rName" value="${esc(state.user||'')}" readonly style="background:var(--line-2);color:var(--soft);cursor:not-allowed">`;
 
   const balHtml = state.role==='employee' ? balanceCard(state.user) : '';
@@ -938,8 +942,8 @@ function viewRequests(isAdmin){
   let fields;
   if(d==='full'){
     fields=`<div class="grid2">
-      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}"></div>
-      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}"></div>
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" onchange="render()"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}" onchange="render()"></div>
     </div>`;
   } else if(d==='half'){
     fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}"></div>
@@ -990,7 +994,7 @@ function viewRequests(isAdmin){
       ${unpaidWarn}
       <div class="row-actions">
         <button class="submit" onclick="submitReq()">Add request<span class="b-es">Agregar solicitud</span></button>
-        <span style="font-size:12px;color:var(--soft);line-height:1.4">${d==='hourly'?`${hpd()}h = 1 day · starts as Pending`:(d==='half'?'0.5 day · starts as Pending':'Starts as Pending')}<span class="es">${d==='hourly'?`${hpd()}h = 1 día · queda Pendiente`:'Queda Pendiente'}</span></span>
+        <span style="font-size:12px;color:var(--soft);line-height:1.4">${(()=>{ if(d==='hourly') return `${hpd()}h = 1 day · ${bl('starts as Pending','queda Pendiente')}`; if(d==='half') return `0.5 day · ${bl('starts as Pending','queda Pendiente')}`; const se=document.getElementById('rStart'), ee=document.getElementById('rEnd'); const bd=(se&&ee&&se.value&&ee.value)?businessDays(se.value,ee.value):null; return `${bd!=null?`<b>${bd} business day${bd===1?'':'s'}</b> (weekends excluded) · `:''}${bl('starts as Pending','queda Pendiente')}`; })()}</span>
       </div>
     </div>
 
