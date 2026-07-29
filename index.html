@@ -48,9 +48,7 @@
   h1,h2,h3{font-family:"Space Grotesk","Inter",sans-serif; margin:0}
   button{font-family:inherit; cursor:pointer; border:none; border-radius:11px; font-weight:600; font-size:15px}
   input,select,textarea{font-family:inherit; font-size:15px; width:100%; padding:12px 13px; border:1.5px solid var(--line); border-radius:11px; background:var(--surface); color:var(--ink); outline:none}
-  input[type="date"],input[type="time"]{ -webkit-appearance:none; appearance:none; min-height:46px; height:46px; text-align:left; line-height:normal; display:block }
-  input[type="date"]::-webkit-date-and-time-value,input[type="time"]::-webkit-date-and-time-value{ text-align:left }
-  input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator{ margin-left:auto; opacity:.6 }
+  input[type="date"],input[type="time"]{ min-height:46px; text-align:left }
   input:focus,select:focus,textarea:focus{border-color:var(--pto)}
   label{display:block; font-size:12.5px; font-weight:600; color:var(--soft); margin:0 0 6px 2px}
   .es{display:block; font-weight:400; font-size:11px; color:var(--faint); margin-top:1px; font-family:"Inter",sans-serif}
@@ -447,6 +445,7 @@ async function submitReq(){
   const name=val('rName').trim(), cat=state.cat, detail=state.detail, dur=state.dur, start=val('rStart');
   if(!name) return toast('Enter a name<span class="b-es">Ingresa un nombre</span>');
   if(!start) return toast('Pick a start date<span class="b-es">Elige la fecha de inicio</span>');
+  if(start < `${curYear()}-01-01`) return toast('Date must be within this year<span class="b-es">La fecha debe ser de este año</span>');
   let end=start, days=0, startTime=null, hours=null;
   if(dur==='full'){
     end=val('rEnd'); if(!end) return toast('Pick an end date<span class="b-es">Elige la fecha de fin</span>');
@@ -479,8 +478,9 @@ async function submitReq(){
   const { error } = await db.from('requests').insert({ name, type:cat, detail, duration:dur, start_date:start, end_date:end, start_time:startTime, hours, days, reason:(val('rReason').trim()||null), submitted_by:state.user, status:'pending' });
   state.busy=false;
   if(error){ console.error(error); toast('Could not add · No se pudo agregar'); return; }
+  await logAudit('submit', summ({name, cat, detail, dur, start, end, startTime, hours, days}) + (start<today()?' · backdated':''));
   toast('Request added<span class="b-es">Solicitud agregada</span>');
-  clearForm(); await loadRequests();
+  clearForm(); await loadRequests(); await loadAudit();
 }
 function summ(r){
   const dl=(DETAIL[r.detail]||CAT[r.cat]||CAT.pto).label;
@@ -994,14 +994,14 @@ function editModal(){
   let fields;
   if(d==='full'){
     fields=`<div class="grid2">
-      <div><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
-      <div><label>End date${es('Fecha de fin')}</label><input id="eEnd" type="date" value="${esc(e.end||e.start||today())}"></div>
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}" min="${curYear()}-01-01"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="eEnd" type="date" value="${esc(e.end||e.start||today())}" min="${curYear()}-01-01"></div>
     </div>`;
   } else if(d==='half'){
-    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="eStart" type="date" value="${esc(e.start||today())}" min="${curYear()}-01-01"></div>
       <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="eTime" type="time" value="${esc(e.startTime||'08:00')}"></div>`;
   } else {
-    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}"></div>
+    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="eStart" type="date" value="${esc(e.start||today())}" min="${curYear()}-01-01"></div>
       <div class="grid2">
         <div><label>Start time${es('Hora de inicio')}</label><input id="eTime" type="time" value="${esc(e.startTime||'08:00')}"></div>
         <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="eHours" type="number" min="1" step="1" value="${esc(e.hours!=null?e.hours:'')}"></div>
@@ -1078,14 +1078,14 @@ function viewRequests(isAdmin){
   let fields;
   if(d==='full'){
     fields=`<div class="grid2">
-      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" onchange="render()"></div>
-      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}" onchange="render()"></div>
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01" onchange="render()"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}" min="${curYear()}-01-01" onchange="render()"></div>
     </div>`;
   } else if(d==='half'){
-    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}"></div>
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01"></div>
       <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>`;
   } else {
-    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}"></div>
+    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01"></div>
       <div class="grid2">
         <div><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>
         <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4"></div>
@@ -1342,6 +1342,7 @@ function reqRow(r,isAdmin){
       <span class="badge ${catB.cls}">${catB.label}<span class="es">${catB.es}</span></span>
       ${showDet?`<span class="badge ${detB.cls}">${detB.label}<span class="es">${detB.es}</span></span>`:''}
       <span class="sbadge" style="color:${st.c};background:${st.bg}">${bl(st.en,st.es)}</span>
+      ${(r.start && r.start<today())?`<span class="sbadge" style="color:var(--early);background:var(--half-bg)" title="Submitted for a past date">${bl('Backdated','Retroactivo')}</span>`:''}
     </div>
     <div class="req-main">
       <div class="req-top"><span class="req-name">${esc(r.name)}</span><span class="req-days">· ${amount}</span></div>
@@ -1420,7 +1421,7 @@ function viewBalances(){
 
 /* ---------- Audit view (admin) ---------- */
 function viewAudit(){
-  const ACT={ approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, cancel:{en:'Cancelled',c:'var(--soft)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, punchedit:{en:'Punch edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
+  const ACT={ submit:{en:'Submitted',c:'var(--early)'}, approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, cancel:{en:'Cancelled',c:'var(--soft)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, punchedit:{en:'Punch edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
   const rows=(state.audit||[]).map(a=>{ const m=ACT[a.action]||{en:a.action,c:'var(--soft)'};
     return `<tr><td style="white-space:nowrap"><span class="sbadge" style="color:${m.c};background:var(--line-2)">${m.en}</span></td><td>${esc(a.detail||'')}</td><td style="white-space:nowrap">${esc(a.actor||'')}</td><td style="white-space:nowrap;color:var(--soft)">${fmtDT(a.created_at)}</td></tr>`;
   }).join('');
