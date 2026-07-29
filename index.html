@@ -392,7 +392,7 @@ async function doAdminLogin(){
   state.role='admin'; state.user=data.user.email; state.view='requests'; enterDash();
 }
 async function enterDash(){
-  state.screen='dash'; render();
+  state.screen='dash'; render(); resetIdleTimer();
   await Promise.all([loadSettings(), loadEmployees()]);
   await loadRequests();
   await loadPunches();
@@ -400,7 +400,22 @@ async function enterDash(){
   if(state.role==='admin'){ await loadAuth(); await loadAudit(); }
   render(); subscribeRealtime();
 }
-async function logout(){ if(state.role==='admin' && db){ try{ await db.auth.signOut(); }catch(e){} } lsDel('pto_emp'); state.user=null; state.role=null; state.screen='login'; state.tab='employee'; render(); }
+async function logout(){ if(state.role==='admin' && db){ try{ await db.auth.signOut(); }catch(e){} } lsDel('pto_emp'); state.user=null; state.role=null; state.screen='login'; state.tab='employee'; stopIdleTimer(); render(); }
+
+/* ---- auto logout after inactivity ---- */
+const IDLE_MS = 5*60*1000;      // 5 minutes of no activity
+const IDLE_WARN_MS = 30*1000;   // warn 30s before
+let _idleT=null, _idleWarnT=null;
+function resetIdleTimer(){
+  if(!state.user) return;            // only when logged in
+  clearTimeout(_idleT); clearTimeout(_idleWarnT);
+  _idleWarnT=setTimeout(()=>{ if(state.user) toast('You will be logged out soon (inactive)<span class="b-es">Se cerrará la sesión por inactividad</span>'); }, IDLE_MS-IDLE_WARN_MS);
+  _idleT=setTimeout(()=>{ if(state.user){ toast('Logged out — inactive 5 min<span class="b-es">Sesión cerrada por inactividad</span>'); logout(); } }, IDLE_MS);
+}
+function stopIdleTimer(){ clearTimeout(_idleT); clearTimeout(_idleWarnT); }
+['click','keydown','touchstart','scroll','mousemove','visibilitychange'].forEach(ev=>{
+  window.addEventListener(ev, ()=>{ if(document.visibilityState!=='hidden' && state.user) resetIdleTimer(); }, {passive:true});
+});
 
 /* ============ actions ============ */
 async function submitReq(){
@@ -604,12 +619,26 @@ async function doPunch(kind){
   for(let j=0;j<idx;j++){ if(!todays.some(p=>p.kind===order[j])){ toast(`Do "${PK[order[j]].en}" first · Primero ${PK[order[j]].es}`); return; } }
   _punchBusy=true; toast('Getting location… · Obteniendo ubicación…');
   const geo=await getGeo();
-  let lat=null,lng=null,acc=null,dist=null;
-  if(geo){ lat=geo.lat; lng=geo.lng; acc=Math.round(geo.acc); const o=officeLoc(); if(o) dist=distM(o.lat,o.lng,lat,lng); }
+  const o=officeLoc();
+  // Location is required to punch
+  if(!geo){ _punchBusy=false; toast('Turn on location to punch. Try again.<span class="b-es">Activa la ubicación para fichar. Intenta de nuevo.</span>'); return; }
+  const lat=geo.lat, lng=geo.lng, acc=Math.round(geo.acc||0);
+  let dist=null;
+  if(o){
+    dist=distM(o.lat,o.lng,lat,lng);
+    const allow=officeRadius();
+    // block if clearly outside the office radius.
+    // grace: if GPS accuracy is poor (acc bigger than radius), allow within radius+accuracy so a weak indoor signal doesn't wrongly block.
+    const limit=Math.max(allow, allow + (acc>allow ? acc : 0));
+    if(dist>limit){ _punchBusy=false; toast(`Too far from the office to punch (${dist}m). Punch from on-site.<span class="b-es">Estás demasiado lejos de la oficina (${dist}m). Ficha en el sitio.</span>`); return; }
+  } else {
+    // office not set yet → can't verify; let admin know via toast, still record with location
+    toast('Office location not set — recorded without on-site check.');
+  }
   const { error } = await db.from('punches').insert({ name, kind, work_date:today(), punched_at:new Date().toISOString(), lat, lng, accuracy:acc, distance_m:dist });
   _punchBusy=false;
   if(error){ console.error(error); toast('Punch failed · Error al registrar'); return; }
-  toast(`${PK[kind].en} ${fmtT(new Date())}${geo?'':' · No location'}<span class="b-es">Registrado</span>`);
+  toast(`${PK[kind].en} ${fmtT(new Date())}<span class="b-es">Registrado</span>`);
   await loadPunches();
 }
 async function delPunchDay(name, date){
@@ -1041,10 +1070,10 @@ function balanceCard(name){
 }
 
 function locBadge(rec){
-  if(rec.lat==null || rec.lng==null) return `<span class="locbadge loc-no">No location</span>`;
-  if(rec.distance_m==null) return `<a class="locbadge loc-no maplink" href="https://maps.google.com/?q=${rec.lat},${rec.lng}" target="_blank">Map (no office set)</a>`;
+  if(rec.lat==null) return `<span class="locbadge loc-no">No location</span>`;
+  if(rec.distance_m==null) return `<span class="locbadge loc-on">On-site</span>`;
   const on=rec.distance_m<=officeRadius();
-  return `<a class="locbadge ${on?'loc-on':'loc-off'} maplink" href="https://maps.google.com/?q=${rec.lat},${rec.lng}" target="_blank">${on?'On-site':'Off-site'} ${rec.distance_m}m</a>`;
+  return `<span class="locbadge ${on?'loc-on':'loc-off'}">${on?'On-site':'Off-site'}</span>`;
 }
 function punchCard(name){
   const day=punchesFor(name, today());
