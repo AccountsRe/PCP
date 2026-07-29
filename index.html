@@ -825,6 +825,7 @@ function toggleForm(){ state.formOpen=!state.formOpen; render(); }
 function filteredRequests(){
   const f=state.filter, q=state.quick;
   return state.requests.filter(r=>{
+    if(state.role==='employee' && r.name!==state.user) return false;
     if(f.person!=='all' && r.name!==f.person) return false;
     if(f.status!=='all' && r.status!==f.status) return false;
     if(f.detail!=='all' && r.detail!==f.detail) return false;
@@ -1142,7 +1143,7 @@ function viewRequests(isAdmin){
 
     <div class="filters">
       <select onchange="setFilter('month',this.value)">${monOpt}</select>
-      <select onchange="setFilter('person',this.value)">${perOpt}</select>
+      ${state.role==='admin'?`<select onchange="setFilter('person',this.value)">${perOpt}</select>`:''}
       <select onchange="setFilter('status',this.value)">${stOpt}</select>
       <select onchange="setFilter('detail',this.value)">${caOpt}</select>
     </div>
