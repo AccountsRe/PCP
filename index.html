@@ -278,7 +278,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{},
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'',
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -332,9 +332,10 @@ function setView(v){
   state.view=v; render();
 }
 function setFilter(k,v){ state.filter[k]=v; render(); }
-function clearForm(){ ['rStart','rEnd','rTime','rHours','rReason'].forEach(id=>{const el=document.getElementById(id); if(el) el.value = (id==='rHours'?'':el.value); }); const rr=document.getElementById('rReason'); if(rr) rr.value=''; }
+function clearForm(){ state.dates={start:'',end:''}; state.rTime='08:00'; state.rHours=''; const rr=document.getElementById('rReason'); if(rr) rr.value=''; }
 function fmtNum(n){ n=+n; return Number.isInteger(n)?n:n.toFixed(2).replace(/0$/,''); }
 function fmtH(n){ return Math.round(+n||0); }
+function dget(k){ return (state.dates && state.dates[k]) ? state.dates[k] : today(); }
 function reqHours(r){
   if(!r) return 0;
   if(r.dur==='hourly') return Math.round(+r.hours||0);
@@ -1078,17 +1079,17 @@ function viewRequests(isAdmin){
   let fields;
   if(d==='full'){
     fields=`<div class="grid2">
-      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01" onchange="render()"></div>
-      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${today()}" min="${curYear()}-01-01" onchange="render()"></div>
+      <div><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${dget('start')}" min="${curYear()}-01-01" onchange="state.dates.start=this.value; render()"></div>
+      <div><label>End date${es('Fecha de fin')}</label><input id="rEnd" type="date" value="${dget('end')}" min="${curYear()}-01-01" onchange="state.dates.end=this.value; render()"></div>
     </div>`;
   } else if(d==='half'){
-    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01"></div>
-      <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>`;
+    fields=`<div class="field"><label>Date${es('Fecha')}</label><input id="rStart" type="date" value="${dget('start')}" min="${curYear()}-01-01" onchange="state.dates.start=this.value"></div>
+      <div class="field"><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="${state.rTime||'08:00'}" onchange="state.rTime=this.value"></div>`;
   } else {
-    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${today()}" min="${curYear()}-01-01"></div>
+    fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${dget('start')}" min="${curYear()}-01-01" onchange="state.dates.start=this.value"></div>
       <div class="grid2">
-        <div><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="08:00"></div>
-        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4"></div>
+        <div><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="${state.rTime||'08:00'}" onchange="state.rTime=this.value"></div>
+        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4" value="${state.rHours||''}" onchange="state.rHours=this.value"></div>
       </div>`;
   }
 
