@@ -299,7 +299,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false,
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null,
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -981,6 +981,7 @@ function renderDash(app){
     ${(isAdmin && state.editing)?editModal():''}
     ${(isAdmin && state.punchEdit)?punchEditModal():''}
     ${(isAdmin && state.calDay)?calDayModal():''}
+    ${(!isAdmin && state.empDay)?empDayModal():''}
     ${state.detailReq?reqDetailModal():''}`;
 }
 
@@ -1273,14 +1274,15 @@ function punchCard(name){
     const dp=state.punches.filter(p=>p.name===name && p.work_date===d);
     const t=k=>{ const r=dp.find(x=>x.kind===k); return r?fmtT(r.punched_at):'<span style="color:var(--faint)">—</span>'; };
     const h=workHours(dp);
-    return `<tr><td style="white-space:nowrap">${fmtDate(d)}</td><td>${t('morning_in')}</td><td>${t('lunch_out')}</td><td>${t('lunch_in')}</td><td>${t('off_out')}</td><td><b>${h?h.toFixed(2)+'h':'—'}</b></td></tr>`;
+    const hasNote = notesFor(name,d).length>0 || dp.some(p=>p.edited_by);
+    return `<tr style="cursor:pointer" onclick="openEmpDay('${d}')"><td style="white-space:nowrap">${fmtDate(d)}${hasNote?' 💬':''}</td><td>${t('morning_in')}</td><td>${t('lunch_out')}</td><td>${t('lunch_in')}</td><td>${t('off_out')}</td><td><b>${h?h.toFixed(2)+'h':'—'}</b> ›</td></tr>`;
   }).join('');
   const historyCard=`<div class="card pad punchcard">
     <div class="sec-title"><span class="dot"></span><span>My recent punches · last 2 weeks${es('Mis fichajes · últimas 2 semanas')}</span></div>
     ${myDates.length?`<div class="tblwrap"><table class="tbl">
       <thead><tr><th>Date${es('Fecha')}</th><th>Morning In${es('Entrada')}</th><th>Lunch Out${es('Salida alm.')}</th><th>Lunch In${es('Regreso')}</th><th>Off Out${es('Salida')}</th><th>Hours${es('Horas')}</th></tr></thead>
       <tbody>${histRows}</tbody>
-    </table></div>`:`<div style="color:var(--soft);font-size:13px;margin-top:6px">No punches in the last 2 weeks.${es('Sin fichajes en las últimas 2 semanas.')}</div>`}
+    </table></div><div style="font-size:11.5px;color:var(--faint);margin-top:8px">Tap a day to see details${es('Toca un día para ver detalles')}</div>`:`<div style="color:var(--soft);font-size:13px;margin-top:6px">No punches in the last 2 weeks.${es('Sin fichajes en las últimas 2 semanas.')}</div>`}
   </div>`;
   return `<div class="card pad punchcard">
     <div class="sec-title"><span class="dot"></span><span>Punch clock · ${fmtDate(today())}${es('Reloj de fichaje')}</span></div>
@@ -1290,6 +1292,34 @@ function punchCard(name){
     ${off?'':`<div class="warnbox" style="margin-top:12px">${IC.info}<div>No punch site is set yet — ask your admin to add one.${es('Aún no hay un sitio de fichaje configurado — pídelo a tu administrador.')}</div></div>`}
   </div>
   ${historyCard}`;
+}
+
+/* ---------- employee: my punch day detail ---------- */
+function openEmpDay(ds){ state.empDay=ds; render(); }
+function closeEmpDay(){ state.empDay=null; render(); }
+function empDayModal(){
+  const ds=state.empDay, name=state.user; if(!ds) return '';
+  const dp=state.punches.filter(p=>p.name===name && p.work_date===ds);
+  const rowFor=k=>{ const r=dp.find(x=>x.kind===k); const pk=PK[k];
+    if(!r) return `<div class="drow"><span class="k">${pk.en}<span class="es">${pk.es}</span></span><span class="v" style="color:var(--faint)">—</span></div>`;
+    return `<div class="drow"><span class="k">${pk.en}<span class="es">${pk.es}</span></span><span class="v">${fmtT(r.punched_at)} ${locBadge(r)}${r.edited_by?' <span style="color:var(--half)" title="adjusted by admin">✎</span>':''}</span></div>`;
+  };
+  const h=workHours(dp);
+  const edits=dp.filter(p=>p.edited_by && p.edit_note);
+  const editHtml=edits.length?`<div style="margin-top:10px">${edits.map(p=>`<div style="font-size:12px;color:var(--half);padding:6px 0;border-top:1px solid var(--line-2)">✎ ${PK[p.kind]?PK[p.kind].en:p.kind} adjusted by admin: ${esc(p.edit_note)}<span class="es" style="margin-top:2px">Ajustado por el administrador</span></div>`).join('')}</div>`:'';
+  const notes=notesFor(name,ds);
+  const notesHtml=`<div style="margin-top:10px">
+    ${notes.map(n=>`<div style="font-size:12.5px;color:var(--soft);padding:7px 0;border-top:1px solid var(--line-2)">💬 ${esc(n.note)}<span style="color:var(--faint)"> · ${fmtT(n.created_at)}${n.by_role==='admin'?' · admin':''}</span></div>`).join('')}
+    <button class="ghost" style="margin-top:10px;padding:9px 13px;font-size:12.5px" onclick="state.empDay=null; addPunchNote('${jsq(name)}','${ds}')">+ Add comment${es('Agregar comentario')}</button>
+  </div>`;
+  return `<div class="overlay" onclick="if(event.target===this)closeEmpDay()"><div class="modal">
+    <h3>${IC.cal} ${fmtDate(ds)}</h3>
+    <div style="margin-top:10px">${rowFor('morning_in')}${rowFor('lunch_out')}${rowFor('lunch_in')}${rowFor('off_out')}</div>
+    <div class="worktotal" style="margin-top:12px"><b>${h?h.toFixed(2):'0'}h</b><span>worked${es('trabajadas')}</span></div>
+    ${editHtml}
+    ${notesHtml}
+    <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closeEmpDay()">Close · Cerrar</button></div>
+  </div></div>`;
 }
 
 /* ---------- Punch view (admin) ---------- */
