@@ -299,7 +299,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null,
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null,
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -981,6 +981,8 @@ function renderDash(app){
     ${(isAdmin && state.editing)?editModal():''}
     ${(isAdmin && state.punchEdit)?punchEditModal():''}
     ${(isAdmin && state.calDay)?calDayModal():''}
+    ${(isAdmin && state.punchAlert)?punchAlertModal():''}
+    ${(isAdmin && state.punchDay)?punchDayModal():''}
     ${(!isAdmin && state.empDay)?empDayModal():''}
     ${state.detailReq?reqDetailModal():''}`;
 }
@@ -1323,14 +1325,82 @@ function empDayModal(){
 }
 
 /* ---------- Punch view (admin) ---------- */
+function punchOffsite(p){ if(p.distance_m==null) return false; const loc=state.locations.find(l=>l.id===p.location_id); const r=loc?loc.radius:officeRadius(); return p.distance_m>r; }
 function punchDaySummary(name,date){
   const day=state.punches.filter(p=>p.name===name && p.work_date===date);
   const get=k=>day.find(x=>x.kind===k);
   const dists=day.filter(p=>p.distance_m!=null).map(p=>p.distance_m);
-  const anyOff = dists.some(d=>d>officeRadius());
+  const anyOff = day.some(punchOffsite);
   const anyNo = day.some(p=>p.lat==null);
   const maxD = dists.length?Math.max(...dists):null;
   return { day, get, hrs:workHours(day), anyOff, anyNo, maxD };
+}
+function last14PunchPairs(){
+  const names=canPunchNames(); const c=new Date(); c.setDate(c.getDate()-13);
+  const cutStr=`${c.getFullYear()}-${String(c.getMonth()+1).padStart(2,'0')}-${String(c.getDate()).padStart(2,'0')}`;
+  const seen=new Set(), pairs=[];
+  state.punches.forEach(p=>{ if(!names.includes(p.name)) return; if(p.work_date<cutStr) return; const k=p.name+'|'+p.work_date; if(!seen.has(k)){ seen.add(k); pairs.push({name:p.name,date:p.work_date}); } });
+  return pairs.sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+}
+function punchAlerts(){
+  const offsite=[], missing=[], comment=[];
+  for(const pr of last14PunchPairs()){
+    const dp=state.punches.filter(p=>p.name===pr.name && p.work_date===pr.date);
+    if(dp.some(punchOffsite)) offsite.push(pr);
+    const kinds=new Set(dp.map(p=>p.kind));
+    if(pr.date<today() && kinds.size<4) missing.push(pr);
+    if(notesFor(pr.name,pr.date).length>0) comment.push(pr);
+  }
+  return {offsite, missing, comment};
+}
+function openPunchAlert(t){ state.punchAlert=t; render(); }
+function closePunchAlert(){ state.punchAlert=null; render(); }
+function openPunchDay(name,date){ state.punchDay={name,date}; state.punchAlert=null; render(); }
+function closePunchDay(){ state.punchDay=null; render(); }
+function punchAlertModal(){
+  const t=state.punchAlert; if(!t) return '';
+  const A=punchAlerts(); const list=A[t]||[];
+  const titles={offsite:'Off-site punches', missing:'Missing punches', comment:'Days with a comment'};
+  const rows=list.length? list.map(pr=>{
+    const dp=state.punches.filter(p=>p.name===pr.name && p.work_date===pr.date);
+    let tag='';
+    if(t==='offsite'){ const mx=Math.max(...dp.filter(punchOffsite).map(p=>p.distance_m)); tag=`<span class="locbadge loc-off">Off-site ${mx}m</span>`; }
+    else if(t==='missing'){ tag=`<span class="locbadge loc-no">${new Set(dp.map(p=>p.kind)).size}/4 punches</span>`; }
+    else { const n=notesFor(pr.name,pr.date)[0]; tag=`<span style="color:var(--soft);font-size:12px">💬 ${esc((n&&n.note||'').slice(0,28))}${n&&n.note&&n.note.length>28?'…':''}</span>`; }
+    return `<div class="drow" style="cursor:pointer" onclick="openPunchDay('${jsq(pr.name)}','${pr.date}')"><span class="k">${esc(pr.name)}<br><span style="font-weight:400;color:var(--soft);font-size:12px">${fmtDate(pr.date)}</span></span><span class="v">${tag} ›</span></div>`;
+  }).join('') : `<div style="color:var(--soft);padding:12px 0">Nothing here in the last 2 weeks.</div>`;
+  return `<div class="overlay" onclick="if(event.target===this)closePunchAlert()"><div class="modal">
+    <h3>${IC.info} ${titles[t]} · last 2 weeks</h3>
+    <div style="margin-top:10px">${rows}</div>
+    <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closePunchAlert()">Close</button></div>
+  </div></div>`;
+}
+function punchDayModal(){
+  const pd=state.punchDay; if(!pd) return '';
+  const {name,date}=pd;
+  const dp=state.punches.filter(p=>p.name===name && p.work_date===date);
+  const rowFor=k=>{ const r=dp.find(x=>x.kind===k); const pk=PK[k];
+    if(!r) return `<div class="drow"><span class="k">${pk.en}</span><span class="v" style="color:var(--faint)">— missing</span></div>`;
+    const loc = r.distance_m!=null ? `<span class="locbadge ${punchOffsite(r)?'loc-off':'loc-on'}">${punchOffsite(r)?'Off':'On'}-site ${r.distance_m}m</span>` : (r.lat==null?'<span class="locbadge loc-no">No loc</span>':'');
+    const mapl=r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:'';
+    return `<div class="drow"><span class="k">${pk.en}</span><span class="v">${fmtT(r.punched_at)} ${loc}${mapl} <button class="ghost" style="padding:3px 8px;font-size:11px" onclick="state.punchDay=null; openPunchEdit('${r.id}')">edit</button>${r.edited_by?' <span style="color:var(--half)" title="edited">✎</span>':''}</span></div>`;
+  };
+  const h=workHours(dp);
+  const edits=dp.filter(p=>p.edited_by && p.edit_note);
+  const editHtml=edits.length?`<div style="margin-top:10px">${edits.map(p=>`<div style="font-size:12px;color:var(--half);padding:6px 0;border-top:1px solid var(--line-2)">✎ ${PK[p.kind]?PK[p.kind].en:p.kind}: ${esc(p.edit_note)} · ${esc(p.edited_by||'')}</div>`).join('')}</div>`:'';
+  const notes=notesFor(name,date);
+  const notesHtml=`<div style="margin-top:10px">
+    ${notes.map(n=>`<div style="font-size:12.5px;color:var(--soft);padding:7px 0;border-top:1px solid var(--line-2)">💬 ${esc(n.note)}<span style="color:var(--faint)"> · ${fmtT(n.created_at)}${n.by_role==='admin'?' · admin':''}</span></div>`).join('')}
+    <button class="ghost" style="margin-top:10px;padding:9px 13px;font-size:12.5px" onclick="state.punchDay=null; addPunchNote('${jsq(name)}','${date}')">+ Add comment</button>
+  </div>`;
+  return `<div class="overlay" onclick="if(event.target===this)closePunchDay()"><div class="modal">
+    <h3>${IC.cal} ${esc(name)} · ${fmtDate(date)}</h3>
+    <div style="margin-top:10px">${rowFor('morning_in')}${rowFor('lunch_out')}${rowFor('lunch_in')}${rowFor('off_out')}</div>
+    <div class="worktotal" style="margin-top:12px"><b>${h?h.toFixed(2):'0'}h</b><span>worked</span></div>
+    ${editHtml}
+    ${notesHtml}
+    <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closePunchDay()">Close</button></div>
+  </div></div>`;
 }
 function viewPunch(){
   const names=canPunchNames();
@@ -1413,6 +1483,11 @@ function viewPunch(){
         <button class="csv" onclick="exportPunchesCSV()">${IC.csv}<span class="txt">CSV (Excel)</span></button>
         <button class="export" onclick="exportPunchesXLSX()">${IC.excel}<span class="txt">Excel .xlsx</span></button>
       </div></div>
+    ${(()=>{ const A=punchAlerts(); return `<div class="stats" style="margin-bottom:14px">
+      <div class="stat click ${A.offsite.length?'':''}" onclick="openPunchAlert('offsite')"><div class="n" style="color:var(--danger)">${A.offsite.length}</div><div class="l">Off-site</div></div>
+      <div class="stat click" onclick="openPunchAlert('missing')"><div class="n" style="color:var(--warnc)">${A.missing.length}</div><div class="l">Missing punch</div></div>
+      <div class="stat click" onclick="openPunchAlert('comment')"><div class="n" style="color:var(--early)">${A.comment.length}</div><div class="l">With comment</div></div>
+    </div>`; })()}
     <div class="card"><div class="tblwrap"><table class="tbl">
       <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Hours</th><th>Location</th><th>Comments</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="9" style="text-align:center;color:var(--soft);padding:30px">No punches yet</td></tr>`}</tbody>
