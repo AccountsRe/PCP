@@ -299,7 +299,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null, punchRange:{from:'',to:''},
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null, punchRange:{from:'',to:''}, punchName:null,
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -1453,7 +1453,7 @@ function viewPunch(){
     dates.forEach(ds=>{ worked+=workHours(state.punches.filter(p=>p.name===nm&&p.work_date===ds)); paid+=leaveHoursOnDate(nm,ds,true); unpaid+=(leaveHoursOnDate(nm,ds,false)-leaveHoursOnDate(nm,ds,true)); });
     return {nm, worked, paid, total:worked+paid, unpaid};
   }).filter(x=>x.worked||x.paid||x.unpaid);
-  const rows=pairs.map(({name,date})=>{
+  const rows=(state.punchName?pairs.filter(p=>p.name===state.punchName):pairs).map(({name,date})=>{
     const s=punchDaySummary(name,date);
     const cell=k=>{ const r=s.get(k); if(!r) return '<span style="color:var(--faint)">—</span>';
       const mapl=r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:'';
@@ -1537,11 +1537,11 @@ function viewPunch(){
       </div>
       ${paySum.length?`<div class="tblwrap" style="margin-top:12px"><table class="tbl">
         <thead><tr><th>Employee</th><th>Worked</th><th>Paid leave (PTO/Sick)</th><th>Total paid</th><th>Unpaid</th></tr></thead>
-        <tbody>${paySum.map(x=>`<tr><td class="name">${esc(x.nm)}</td><td>${x.worked.toFixed(2)}h</td><td>${x.paid.toFixed(2)}h</td><td><b>${x.total.toFixed(2)}h</b></td><td>${x.unpaid?x.unpaid.toFixed(2)+'h':'—'}</td></tr>`).join('')}</tbody>
+        <tbody>${paySum.map(x=>`<tr style="cursor:pointer" onclick="state.punchName=(state.punchName==='${jsq(x.nm)}'?null:'${jsq(x.nm)}'); render()" title="Show only this employee's records"><td class="name" style="color:${state.punchName===x.nm?'var(--pto)':'inherit'}">${esc(x.nm)}${state.punchName===x.nm?' ✓':''}</td><td>${x.worked.toFixed(2)}h</td><td>${x.paid.toFixed(2)}h</td><td><b>${x.total.toFixed(2)}h</b></td><td>${x.unpaid?x.unpaid.toFixed(2)+'h':'—'}</td></tr>`).join('')}</tbody>
       </table></div><div style="font-size:11.5px;color:var(--faint);margin-top:6px">Total paid = worked punch hours + approved PTO/Sick. Unpaid is shown separately and not included.</div>`:`<div style="font-size:12.5px;color:var(--soft);margin-top:10px">Pick a pay period (or Last 2 weeks) to see the payroll summary.</div>`}
     </div>
 
-    <div class="list-head"><div><h3>Punch records${hasR?` · ${fmtDate(lo)} → ${fmtDate(hi)}`:''}</h3><div class="count">${names.length} tracked · ${pairs.length} days</div></div>
+    <div class="list-head"><div><h3>Punch records${hasR?` · ${fmtDate(lo)} → ${fmtDate(hi)}`:''}${state.punchName?` · ${esc(state.punchName)}`:''}</h3><div class="count">${names.length} tracked · ${(state.punchName?pairs.filter(p=>p.name===state.punchName):pairs).length} days${state.punchName?` · <a onclick="state.punchName=null;render()" style="cursor:pointer;color:var(--pto)">show all</a>`:' · tap a name above to filter'}</div></div>
       <div class="headbtns">
         <button class="csv" onclick="exportPunchesCSV()">${IC.csv}<span class="txt">CSV (Excel)</span></button>
         <button class="export" onclick="exportPunchesXLSX()">${IC.excel}<span class="txt">Excel .xlsx</span></button>
