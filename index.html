@@ -14,6 +14,11 @@
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="POCAS PTO">
 <title>PTO & Sick Leave · Vacaciones y Enfermedad</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -145,6 +150,22 @@
   .formtoggle .chev{font-size:22px; font-weight:700; color:var(--pto); line-height:1; width:26px; height:26px; display:flex; align-items:center; justify-content:center}
   .savebar{position:sticky; bottom:0; margin-top:14px; background:var(--surface); border:1.5px solid var(--pto); border-radius:12px; padding:11px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; box-shadow:0 4px 16px rgba(0,0,0,.08); font-size:13.5px}
   .savebar .submit{padding:9px 18px}
+  .cal-head{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px}
+  .cal-nav{display:flex; align-items:center; gap:6px}
+  .cal-legend{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap}
+  .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:5px}
+  .cal-wd{text-align:center; font-size:11px; font-weight:700; color:var(--soft); padding:2px 0}
+  .cal-cell{min-height:64px; border:1px solid var(--line-2); border-radius:9px; padding:4px; cursor:pointer; overflow:hidden; background:var(--surface); transition:.1s}
+  .cal-cell.cal-empty{border:none; background:none; cursor:default}
+  .cal-cell.cal-has:hover{border-color:var(--ink)}
+  .cal-cell.cal-today{border-color:var(--pto); box-shadow:0 0 0 1.5px var(--pto-bg)}
+  .cal-d{font-size:12px; font-weight:700; color:var(--soft); margin-bottom:2px}
+  .cal-chip{font-size:10px; font-weight:700; border-radius:5px; padding:1px 5px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5}
+  .cal-pto{background:var(--pto-bg); color:var(--pto)}
+  .cal-sick{background:var(--sick-bg); color:var(--sick)}
+  .cal-more{font-size:10px; color:var(--soft); font-weight:700}
+  .cal-range{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--line-2)}
+  @media(max-width:600px){ .cal-cell{min-height:52px} .cal-chip{font-size:9px; padding:1px 3px} .cal-d{font-size:11px} }
 
   .balwrap{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px}
   .bal{border-radius:14px; padding:16px 17px; border:1px solid var(--line); background:var(--surface)}
@@ -278,7 +299,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'',
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false,
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -332,7 +353,7 @@ function setView(v){
   state.view=v; render();
 }
 function setFilter(k,v){ state.filter[k]=v; render(); }
-function clearForm(){ state.dates={start:'',end:''}; state.rTime='08:00'; state.rHours=''; const rr=document.getElementById('rReason'); if(rr) rr.value=''; }
+function clearForm(){ state.dates={start:'',end:''}; state.rTime='08:00'; state.rHours=''; state.rReason=''; state.mgr=false; }
 function fmtNum(n){ n=+n; return Number.isInteger(n)?n:n.toFixed(2).replace(/0$/,''); }
 function fmtH(n){ return Math.round(+n||0); }
 function dget(k){ return (state.dates && state.dates[k]) ? state.dates[k] : today(); }
@@ -378,7 +399,8 @@ function mapRow(r){
   return { id:r.id, name:r.name, cat, dur, detail:(r.detail||cat), start:r.start_date, end:r.end_date, days:+r.days,
            startTime:r.start_time, hours:(r.hours!=null?+r.hours:null),
            reason:r.reason, by:r.submitted_by, status:r.status||'pending',
-           reviewedBy:r.reviewed_by, reviewedAt:r.reviewed_at, editedBy:r.edited_by, editedAt:r.edited_at, createdAt:r.created_at };
+           reviewedBy:r.reviewed_by, reviewedAt:r.reviewed_at, editedBy:r.edited_by, editedAt:r.edited_at, createdAt:r.created_at,
+           mgr:(r.manager_confirmed===true?true:(r.manager_confirmed===false?false:null)) };
 }
 async function loadRequests(){
   if(!db) return;
@@ -474,6 +496,19 @@ async function submitReq(){
     if(!hours || hours<=0) return toast('Enter hours (whole)<span class="b-es">Ingresa las horas (enteras)</span>');
     days = Math.round((hours/hpd())*100)/100;
   }
+  // Reason is required
+  const reason=(state.rReason||'').trim();
+  if(!reason) return toast('Reason is required<span class="b-es">El motivo es obligatorio</span>');
+  // Balance check for PTO/Sick (Unpaid draws from nothing)
+  if(cat==='pto' || cat==='sick'){
+    const reqH = Math.round(days*hpd());
+    const remaining = allowanceFor(name,cat) - usageFor(name,cat,'approved') - usageFor(name,cat,'pending');
+    if(reqH > remaining){
+      const kindL = cat==='pto'?'PTO':'Sick';
+      toast(`Not enough ${kindL} balance — ${fmtH(remaining)}h left, ${reqH}h requested<span class="b-es">Saldo insuficiente de ${kindL} — quedan ${fmtH(remaining)}h, solicitas ${reqH}h</span>`);
+      return;
+    }
+  }
   if(cat==='unpaid'){
     const ptoLeft=allowanceFor(name,'pto')-usageFor(name,'pto','approved');
     const sickLeft=allowanceFor(name,'sick')-usageFor(name,'sick','approved');
@@ -489,7 +524,7 @@ async function submitReq(){
     }
   }
   state.busy=true;
-  const { error } = await db.from('requests').insert({ name, type:cat, detail, duration:dur, start_date:start, end_date:end, start_time:startTime, hours, days, reason:(val('rReason').trim()||null), submitted_by:state.user, status:'pending' });
+  const { error } = await db.from('requests').insert({ name, type:cat, detail, duration:dur, start_date:start, end_date:end, start_time:startTime, hours, days, reason, manager_confirmed:!!state.mgr, submitted_by:state.user, status:'pending' });
   state.busy=false;
   if(error){ console.error(error); toast('Could not add · No se pudo agregar'); return; }
   await logAudit('submit', summ({name, cat, detail, dur, start, end, startTime, hours, days}) + (start<today()?' · backdated':''));
@@ -695,13 +730,16 @@ async function doPunch(kind){
   const geo=await getGeo();
   if(!geo){ _punchBusy=false; toast('Turn on location to punch. Try again.<span class="b-es">Activa la ubicación para fichar. Intenta de nuevo.</span>'); return; }
   const lat=geo.lat, lng=geo.lng, acc=Math.round(geo.acc||0);
+  // Require a precise (phone GPS) fix. Desktops locate by Wi-Fi/IP with huge error, so block them.
+  const ACC_LIMIT=500;
+  if(acc>ACC_LIMIT){ _punchBusy=false; toast('Location not precise enough — please punch from your phone (GPS on).<span class="b-es">Ubicación poco precisa — ficha desde tu teléfono con GPS.</span>'); return; }
   const locs=allowedLocationsFor(name);
   let dist=null, locId=null, locName=null;
   if(locs.length){
     let best=null, near=null;
-    for(const l of locs){ const dd=distM(l.lat,l.lng,lat,lng); const limit=Math.max(l.radius, l.radius+(acc>l.radius?acc:0));
+    for(const l of locs){ const dd=distM(l.lat,l.lng,lat,lng);
       if(!near||dd<near.dd) near={l,dd};
-      if(dd<=limit && (!best||dd<best.dd)) best={l,dd};
+      if(dd<=l.radius && (!best||dd<best.dd)) best={l,dd};
     }
     if(!best){ _punchBusy=false; toast(`Too far from your site (${near?near.dd:'?'}m from ${near?esc(near.l.name):'site'}). Punch on-site.<span class="b-es">Estás demasiado lejos de tu sitio. Ficha en el lugar.</span>`); return; }
     dist=best.dd; locId=best.l.id; locName=best.l.name;
@@ -942,6 +980,7 @@ function renderDash(app){
     ${body}
     ${(isAdmin && state.editing)?editModal():''}
     ${(isAdmin && state.punchEdit)?punchEditModal():''}
+    ${(isAdmin && state.calDay)?calDayModal():''}
     ${state.detailReq?reqDetailModal():''}`;
 }
 
@@ -976,6 +1015,8 @@ function reqDetailModal(){
     [bl('Detail','Detalle'), (detB?detB.label:catB.label)],
     [bl('When','Cuándo'), when],
     [bl('Amount','Cantidad'), `${fmtH(reqHours(r))}h`],
+    (r.cat==='pto'||r.cat==='sick')?[bl(r.cat==='pto'?'PTO left':'Sick left','Restante'), `${fmtH(allowanceFor(r.name,r.cat)-usageFor(r.name,r.cat,'approved'))}h`]:null,
+    [bl('Manager confirmed','Gerente confirmó'), r.mgr===true?bl('Yes','Sí'):bl('No — unconfirmed','No — sin confirmar')],
     r.reason?[bl('Reason','Motivo'), esc(r.reason)]:null,
     [bl('Submitted','Enviado'), fmtDT(r.createdAt)+(r.by?` · ${esc(r.by)}`:'')],
     r.reviewedBy?[bl('Reviewed by','Revisado'), `${esc(r.reviewedBy)}`+(r.reviewedAt?` · ${fmtDT(r.reviewedAt)}`:'')]:null,
@@ -1102,7 +1143,7 @@ function viewRequests(isAdmin){
     fields=`<div class="field"><label>Start date${es('Fecha de inicio')}</label><input id="rStart" type="date" value="${dget('start')}" min="${curYear()}-01-01" onchange="state.dates.start=this.value"></div>
       <div class="grid2">
         <div><label>Start time${es('Hora de inicio')}</label><input id="rTime" type="time" value="${state.rTime||'08:00'}" onchange="state.rTime=this.value"></div>
-        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4" value="${state.rHours||''}" onchange="state.rHours=this.value"></div>
+        <div><label>Hours (whole)${es('Horas (enteras)')}</label><input id="rHours" type="number" min="1" step="1" placeholder="4" value="${state.rHours||''}" oninput="state.rHours=this.value"></div>
       </div>`;
   }
 
@@ -1137,7 +1178,12 @@ function viewRequests(isAdmin){
         <div class="seg ${d==='hourly'?'on-dur':''}" onclick="setDur('hourly')">Hourly<span class="seg-es">Por horas</span></div>
       </div>
       ${fields}
-      <div class="field" style="margin-top:13px"><label>Reason (optional)${es('Motivo (opcional)')}</label><input id="rReason" placeholder="e.g. personal · p. ej. asunto personal"></div>
+      <div class="field" style="margin-top:13px"><label>Reason — required${es('Motivo — obligatorio')}</label><input id="rReason" value="${esc(state.rReason||'')}" oninput="state.rReason=this.value" placeholder="e.g. personal · p. ej. asunto personal"></div>
+      <div class="flabel" style="margin-top:13px">Manager already confirmed?${es('¿El gerente ya lo confirmó?')}</div>
+      <div class="segs" style="margin-bottom:4px">
+        <div class="seg ${state.mgr?'on-dur':''}" onclick="state.mgr=true;render()">Yes<span class="seg-es">Sí</span></div>
+        <div class="seg ${!state.mgr?'on-dur':''}" onclick="state.mgr=false;render()">No<span class="seg-es">No</span></div>
+      </div>
       ${unpaidWarn}
       <div class="row-actions">
         <button class="submit" onclick="submitReq()">Add request<span class="b-es">Agregar solicitud</span></button>
@@ -1149,10 +1195,13 @@ function viewRequests(isAdmin){
     <div class="stats">
       <div class="stat click ${state.quick===null?'':''}" onclick="toggleQuick(null)"><div class="n">${list.length}</div><div class="l">Shown requests${es('Solicitudes mostradas')}</div></div>
       <div class="stat warn click ${state.quick==='pending'?'on':''}" onclick="toggleQuick('pending')"><div class="n">${pending}</div><div class="l">Pending${es('Pendientes')}</div></div>
+      ${state.role==='admin'?'':`
       <div class="stat pto click ${state.quick==='pto'?'on':''}" onclick="toggleQuick('pto')"><div class="n">${fmtH(ptoHrs)}h</div><div class="l">PTO hours${es('Horas de vacaciones')}</div></div>
       <div class="stat sick click ${state.quick==='sick'?'on':''}" onclick="toggleQuick('sick')"><div class="n">${fmtH(sickHrs)}h</div><div class="l">Sick hours${es('Horas enfermedad')}</div></div>
-      <div class="stat unpaid click ${state.quick==='unpaid'?'on':''}" onclick="toggleQuick('unpaid')"><div class="n">${fmtH(unpaidHrs)}h</div><div class="l">Unpaid hours${es('Horas sin goce')}</div></div>
+      <div class="stat unpaid click ${state.quick==='unpaid'?'on':''}" onclick="toggleQuick('unpaid')"><div class="n">${fmtH(unpaidHrs)}h</div><div class="l">Unpaid hours${es('Horas sin goce')}</div></div>`}
     </div>
+    ${state.role==='admin'?calendarCard():''}
+
 
 
     <div class="filters">
@@ -1217,13 +1266,30 @@ function punchCard(name){
     <button class="ghost" style="margin-top:10px;padding:9px 13px;font-size:12.5px" onclick="addPunchNote('${jsq(name)}','${today()}')">+ Add comment${es('Agregar comentario')}</button>
   </div>`;
   const off=allowedLocationsFor(name).length>0;
+  // last 14 days of this employee's own punches
+  const cut=new Date(); cut.setDate(cut.getDate()-13); const cutStr=`${cut.getFullYear()}-${String(cut.getMonth()+1).padStart(2,'0')}-${String(cut.getDate()).padStart(2,'0')}`;
+  const myDates=[...new Set(state.punches.filter(p=>p.name===name && p.work_date>=cutStr).map(p=>p.work_date))].sort((a,b)=>b.localeCompare(a));
+  const histRows=myDates.map(d=>{
+    const dp=state.punches.filter(p=>p.name===name && p.work_date===d);
+    const t=k=>{ const r=dp.find(x=>x.kind===k); return r?fmtT(r.punched_at):'<span style="color:var(--faint)">—</span>'; };
+    const h=workHours(dp);
+    return `<tr><td style="white-space:nowrap">${fmtDate(d)}</td><td>${t('morning_in')}</td><td>${t('lunch_out')}</td><td>${t('lunch_in')}</td><td>${t('off_out')}</td><td><b>${h?h.toFixed(2)+'h':'—'}</b></td></tr>`;
+  }).join('');
+  const historyCard=`<div class="card pad punchcard">
+    <div class="sec-title"><span class="dot"></span><span>My recent punches · last 2 weeks${es('Mis fichajes · últimas 2 semanas')}</span></div>
+    ${myDates.length?`<div class="tblwrap"><table class="tbl">
+      <thead><tr><th>Date${es('Fecha')}</th><th>Morning In${es('Entrada')}</th><th>Lunch Out${es('Salida alm.')}</th><th>Lunch In${es('Regreso')}</th><th>Off Out${es('Salida')}</th><th>Hours${es('Horas')}</th></tr></thead>
+      <tbody>${histRows}</tbody>
+    </table></div>`:`<div style="color:var(--soft);font-size:13px;margin-top:6px">No punches in the last 2 weeks.${es('Sin fichajes en las últimas 2 semanas.')}</div>`}
+  </div>`;
   return `<div class="card pad punchcard">
     <div class="sec-title"><span class="dot"></span><span>Punch clock · ${fmtDate(today())}${es('Reloj de fichaje')}</span></div>
     <div class="punchgrid">${cells}</div>
     ${hrsTxt}
     ${notesHtml}
     ${off?'':`<div class="warnbox" style="margin-top:12px">${IC.info}<div>No punch site is set yet — ask your admin to add one.${es('Aún no hay un sitio de fichaje configurado — pídelo a tu administrador.')}</div></div>`}
-  </div>`;
+  </div>
+  ${historyCard}`;
 }
 
 /* ---------- Punch view (admin) ---------- */
@@ -1283,8 +1349,12 @@ function viewPunch(){
   }).join('');
 
   return `
-    <div class="card pad" style="margin-bottom:16px">
-      <div class="sec-title"><span class="dot"></span><span>Punch sites</span></div>
+    <div class="card pad reqform" style="margin-bottom:16px">
+      <button class="formtoggle" onclick="state.sitesOpen=!state.sitesOpen; render()">
+        <span class="sec-title" style="margin:0"><span class="dot"></span><span>Punch sites · ${state.locations.length}</span></span>
+        <span class="chev">${state.sitesOpen?'&#8722;':'&#43;'}</span>
+      </button>
+      ${state.sitesOpen?`<div style="margin-top:14px">
       <div style="font-size:12.5px;color:var(--soft);line-height:1.5;margin-bottom:12px">Add each place employees may punch. Stand at the site and tap <b>Add current location</b> (most accurate), or add coordinates manually. Radius = how close they must be (150–250m is typical).</div>
       <div class="tblwrap"><table class="tbl">
         <thead><tr><th>Site name</th><th>Latitude</th><th>Longitude</th><th>Radius (m)</th><th>Map</th><th></th></tr></thead>
@@ -1293,14 +1363,20 @@ function viewPunch(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
         <button class="submit" onclick="addLocationHere()" style="padding:11px 16px">+ Add current location</button>
         <button class="ghost" onclick="addLocationManual()" style="padding:11px 16px">+ Add by coordinates</button>
-      </div>
+      </div></div>`:''}
     </div>
 
-    <div class="card pad" style="margin-bottom:16px">
-      <div class="sec-title"><span class="dot"></span><span>Who punches where</span></div>
+    <div class="card pad reqform" style="margin-bottom:16px">
+      <button class="formtoggle" onclick="state.whoOpen=!state.whoOpen; render()">
+        <span class="sec-title" style="margin:0"><span class="dot"></span><span>Who punches where</span></span>
+        <span class="chev">${state.whoOpen?'&#8722;':'&#43;'}</span>
+      </button>
+      ${state.whoOpen?`<div style="margin-top:14px">
       <div style="font-size:12.5px;color:var(--soft);line-height:1.5">Check the sites each person may punch at. Leave all unchecked to allow any site.</div>
       ${accessRows || '<div style="color:var(--soft);font-size:13px;margin-top:8px">Enable punch for employees in the Balances tab first.</div>'}
+      </div>`:''}
     </div>
+
 
     <div class="list-head"><div><h3>Punch records</h3><div class="count">${names.length} tracked · ${pairs.length} days</div></div>
       <div class="headbtns">
@@ -1334,6 +1410,71 @@ function exportPunchesXLSX(){
   toast('Excel downloaded<span class="b-es">Excel descargado</span>');
 }
 
+/* ---------- approved PTO/Sick calendar (admin) ---------- */
+function calCur(){ return state.calMonth || today().slice(0,7); }
+function calShift(delta){ const [y,m]=calCur().split('-').map(Number); const d=new Date(y, m-1+delta, 1); state.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; render(); }
+function calToday(){ state.calMonth=today().slice(0,7); render(); }
+function reqCoversDate(r, ds){ if(r.status!=='approved') return false; if(r.cat!=='pto'&&r.cat!=='sick') return false; if(r.dur==='full'){ const dt=new Date(ds+'T00:00:00'); const wd=dt.getDay(); if(wd===0||wd===6) return false; return ds>=r.start && ds<=(r.end||r.start); } return ds===r.start; }
+function requestsOnDate(ds){ return state.requests.filter(r=>reqCoversDate(r,ds)); }
+function setCalDay(ds){ state.calDay=ds; render(); }
+function closeCalDay(){ state.calDay=null; render(); }
+function calDayModal(){
+  const ds=state.calDay; if(!ds) return '';
+  const list=requestsOnDate(ds);
+  const rows = list.length ? list.map(r=>{ const cb=CAT[r.cat]||CAT.pto; return `<div class="drow" style="cursor:pointer" onclick="state.calDay=null; openReqDetail('${r.id}')"><span class="k">${esc(r.name)} <span class="badge ${cb.cls}" style="margin-left:4px">${cb.label}</span></span><span class="v">${fmtH(reqHours(r))}h ›</span></div>`; }).join('') : `<div style="color:var(--soft);padding:10px 0">No approved time off on this day.</div>`;
+  return `<div class="overlay" onclick="if(event.target===this)closeCalDay()"><div class="modal">
+    <h3>${IC.cal} ${fmtDate(ds)}</h3>
+    <div style="margin-top:10px">${rows}</div>
+    <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closeCalDay()">Close</button></div>
+  </div></div>`;
+}
+function calendarCard(){
+  const ym=calCur(); const [y,m]=ym.split('-').map(Number);
+  const first=new Date(y, m-1, 1); const startWd=first.getDay(); const dim=new Date(y, m, 0).getDate();
+  const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const WD=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  let cells='';
+  for(let i=0;i<startWd;i++) cells+=`<div class="cal-cell cal-empty"></div>`;
+  for(let d=1; d<=dim; d++){
+    const ds=`${ym}-${String(d).padStart(2,'0')}`;
+    const list=requestsOnDate(ds);
+    const isToday = ds===today();
+    const chips = list.slice(0,3).map(r=>{ const isP=r.cat==='pto'; return `<div class="cal-chip ${isP?'cal-pto':'cal-sick'}" title="${esc(r.name)} · ${isP?'PTO':'Sick'}">${esc(r.name.split(' ')[0])}</div>`; }).join('');
+    const more = list.length>3?`<div class="cal-more">+${list.length-3}</div>`:'';
+    cells+=`<div class="cal-cell${isToday?' cal-today':''}${list.length?' cal-has':''}" onclick="setCalDay('${ds}')"><div class="cal-d">${d}</div>${chips}${more}</div>`;
+  }
+  const wdh=WD.map(w=>`<div class="cal-wd">${w}</div>`).join('');
+  return `<div class="card pad" style="margin-bottom:16px">
+    <div class="cal-head">
+      <div class="sec-title" style="margin:0"><span class="dot"></span><span>Approved time off</span></div>
+      <div class="cal-nav">
+        <button class="ghost" onclick="calShift(-1)" style="padding:6px 11px">‹</button>
+        <span style="font-weight:700;min-width:130px;text-align:center">${MN[m-1]} ${y}</span>
+        <button class="ghost" onclick="calShift(1)" style="padding:6px 11px">›</button>
+        <button class="ghost" onclick="calToday()" style="padding:6px 11px;font-size:12px">Today</button>
+      </div>
+    </div>
+    <div class="cal-legend"><span class="cal-chip cal-pto" style="display:inline-block">PTO</span> <span class="cal-chip cal-sick" style="display:inline-block">Sick</span> <span style="color:var(--soft);font-size:12px">· tap a day for details</span></div>
+    <div class="cal-grid">${wdh}${cells}</div>
+    <div class="cal-range">
+      <span style="font-size:12.5px;color:var(--soft)">Date range:</span>
+      <input type="date" value="${esc(state.calRange.from||'')}" onchange="state.calRange.from=this.value; render()" style="max-width:160px">
+      <span style="color:var(--soft)">→</span>
+      <input type="date" value="${esc(state.calRange.to||'')}" onchange="state.calRange.to=this.value; render()" style="max-width:160px">
+      ${(state.calRange.from||state.calRange.to)?`<button class="ghost" onclick="state.calRange={from:'',to:''}; render()" style="padding:7px 11px;font-size:12px">Clear</button>`:''}
+    </div>
+    ${calRangeList()}
+  </div>`;
+}
+function calRangeList(){
+  const f=state.calRange.from, t=state.calRange.to; if(!f||!t) return '';
+  const lo=f<t?f:t, hi=f<t?t:f;
+  const list=state.requests.filter(r=>(r.cat==='pto'||r.cat==='sick')&&r.status==='approved'&&(r.start||'')<=hi&&((r.end||r.start)||'')>=lo).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  if(!list.length) return `<div style="color:var(--soft);font-size:13px;margin-top:12px">No approved PTO/Sick between ${fmtDate(lo)} and ${fmtDate(hi)}.</div>`;
+  return `<div style="margin-top:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">${fmtDate(lo)} → ${fmtDate(hi)} · ${list.length} approved</div>
+    ${list.map(r=>{ const cb=CAT[r.cat]||CAT.pto; const dl=r.start===(r.end||r.start)?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`; return `<div class="drow" style="cursor:pointer" onclick="openReqDetail('${r.id}')"><span class="k">${esc(r.name)} <span class="badge ${cb.cls}" style="margin-left:4px">${cb.label}</span></span><span class="v">${dl} · ${fmtH(reqHours(r))}h ›</span></div>`; }).join('')}</div>`;
+}
+
 function reqRow(r,isAdmin){
   const catB=CAT[r.cat]||CAT.pto, detB=DETAIL[r.detail], st=STATUS[r.status]||STATUS.pending;
   const showDet = detB && detB.label!==catB.label;
@@ -1351,15 +1492,24 @@ function reqRow(r,isAdmin){
   }
   const reviewed = r.reviewedBy ? ` · ${st.en} by ${esc(r.reviewedBy)}` : '';
   const edited = r.editedBy ? ` · edited by ${esc(r.editedBy)}` : '';
+  const mgrTag = r.mgr===true
+    ? `<span class="sbadge" style="color:var(--ok);background:var(--ok-bg)" title="Manager confirmed">${bl('Mgr ✓','Gerente ✓')}</span>`
+    : `<span class="sbadge" style="color:var(--warnc);background:var(--warn-bg)" title="Manager not confirmed">${bl('Unconfirmed','Sin confirmar')}</span>`;
+  let balChip='';
+  if(isAdmin && (r.cat==='pto'||r.cat==='sick')){
+    const rem = allowanceFor(r.name,r.cat) - usageFor(r.name,r.cat,'approved');
+    balChip = `<span class="req-days" style="color:${rem<=8?'var(--danger)':'var(--soft)'}"> · ${r.cat==='pto'?'PTO':'Sick'} left ${fmtH(rem)}h</span>`;
+  }
   return `<div class="req" onclick="openReqDetail('${r.id}')" style="cursor:pointer">
     <div class="badges">
       <span class="badge ${catB.cls}">${catB.label}<span class="es">${catB.es}</span></span>
       ${showDet?`<span class="badge ${detB.cls}">${detB.label}<span class="es">${detB.es}</span></span>`:''}
       <span class="sbadge" style="color:${st.c};background:${st.bg}">${bl(st.en,st.es)}</span>
+      ${mgrTag}
       ${(r.start && r.start<today())?`<span class="sbadge" style="color:var(--early);background:var(--half-bg)" title="Submitted for a past date">${bl('Backdated','Retroactivo')}</span>`:''}
     </div>
     <div class="req-main">
-      <div class="req-top"><span class="req-name">${esc(r.name)}</span><span class="req-days">· ${amount}</span></div>
+      <div class="req-top"><span class="req-name">${esc(r.name)}</span><span class="req-days">· ${amount}</span>${balChip}</div>
       <div class="req-dates">${dateLine}</div>
       ${r.reason?`<div class="req-reason">${esc(r.reason)}</div>`:''}
       <div class="req-meta">${blslash('Submitted','Enviado')} ${fmtDT(r.createdAt)}${r.by?` · ${esc(r.by)}`:''}${reviewed}${edited}</div>
@@ -1368,6 +1518,7 @@ function reqRow(r,isAdmin){
       <button class="act ok ${r.status==='approved'?'on':''}" title="Approve · Aprobar" onclick="setStatus('${r.id}','approved')">${IC.check}</button>
       <button class="act no ${r.status==='rejected'?'on':''}" title="Reject · Rechazar" onclick="setStatus('${r.id}','rejected')">${IC.x}</button>
       <button class="act edit" title="Edit · Editar" onclick="openEdit('${r.id}')">${IC.pencil}</button>
+      <button class="act del" title="Cancel · Cancelar" onclick="setStatus('${r.id}','cancelled')">${IC.trash}</button>
     </div>`:''}
   </div>`;
 }
@@ -1434,13 +1585,40 @@ function viewBalances(){
 }
 
 /* ---------- Audit view (admin) ---------- */
+async function auditExportRows(){
+  const ACTL={ submit:'Submitted', approve:'Approved', reject:'Rejected', cancel:'Cancelled', delete:'Deleted', edit:'Edited', punchedit:'Punch edited', allowance:'Allowance', setting:'Setting', roster:'Roster', code:'Login code', punchset:'Punch access', punchdel:'Punch deleted' };
+  let data=state.audit||[];
+  try{ const res=await db.from('audit_log').select('*').order('created_at',{ascending:false}).limit(10000); if(res.data) data=res.data; }catch(e){ console.error(e); }
+  return data.map(a=>({
+    'Date/Time':fmtDT(a.created_at),
+    'Action':ACTL[a.action]||a.action,
+    'Detail (incl. reason / old → new)':a.detail||'',
+    'By':a.actor||''
+  }));
+}
+async function exportAuditCSV(){
+  const rows=await auditExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; }
+  downloadCSV(`Audit_log_${today()}.csv`, toCSV(rows)); toast('CSV downloaded<span class="b-es">CSV descargado</span>');
+}
+async function exportAuditXLSX(){
+  if(typeof XLSX==='undefined'){ toast('Excel module still loading'); return; }
+  const rows=await auditExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; }
+  const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[{wch:20},{wch:14},{wch:60},{wch:24}];
+  XLSX.utils.book_append_sheet(wb,ws,'Audit log'); XLSX.writeFile(wb,`Audit_log_${today()}.xlsx`);
+  toast('Excel downloaded<span class="b-es">Excel descargado</span>');
+}
 function viewAudit(){
   const ACT={ submit:{en:'Submitted',c:'var(--early)'}, approve:{en:'Approved',c:'var(--ok)'}, reject:{en:'Rejected',c:'var(--warnc)'}, cancel:{en:'Cancelled',c:'var(--soft)'}, delete:{en:'Deleted',c:'var(--danger)'}, edit:{en:'Edited',c:'var(--half)'}, punchedit:{en:'Punch edited',c:'var(--half)'}, allowance:{en:'Allowance',c:'var(--half)'}, setting:{en:'Setting',c:'var(--half)'}, roster:{en:'Roster',c:'var(--early)'}, code:{en:'Login code',c:'var(--early)'}, punchset:{en:'Punch access',c:'var(--early)'}, punchdel:{en:'Punch deleted',c:'var(--danger)'} };
   const rows=(state.audit||[]).map(a=>{ const m=ACT[a.action]||{en:a.action,c:'var(--soft)'};
     return `<tr><td style="white-space:nowrap"><span class="sbadge" style="color:${m.c};background:var(--line-2)">${m.en}</span></td><td>${esc(a.detail||'')}</td><td style="white-space:nowrap">${esc(a.actor||'')}</td><td style="white-space:nowrap;color:var(--soft)">${fmtDT(a.created_at)}</td></tr>`;
   }).join('');
   return `
-    <div class="list-head"><div><h3>Audit log<span class="es">Registro de auditoría</span></h3><div class="count">Admin actions · last 200</div></div></div>
+    <div class="list-head"><div><h3>Audit log</h3><div class="count">Every action, with details (reasons, old → new)</div></div>
+      <div class="headbtns">
+        <button class="csv" onclick="exportAuditCSV()">${IC.csv}<span class="txt">CSV (Excel)</span></button>
+        <button class="export" onclick="exportAuditXLSX()">${IC.excel}<span class="txt">Excel .xlsx</span></button>
+      </div></div>
     <div class="card"><div class="tblwrap"><table class="tbl">
       <thead><tr><th>Action</th><th>Detail</th><th>Admin</th><th>When</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="4" style="text-align:center;color:var(--soft);padding:30px">No activity yet · Sin actividad</td></tr>`}</tbody>
