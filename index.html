@@ -820,6 +820,20 @@ async function addPunchNote(name, date){
 }
 function openPunchEdit(id){ const p=state.punches.find(x=>x.id===id); if(!p) return; state.punchEdit=Object.assign({}, p); render(); }
 function closePunchEdit(){ state.punchEdit=null; render(); }
+async function addMissingPunch(name, date, kind){
+  const el=document.getElementById(`mp_${kind}`);
+  const t=el?el.value:'';
+  if(!t){ toast('Pick a time · Elige la hora'); return; }
+  const reason=prompt(`Reason for adding ${PK[kind]?PK[kind].en:kind} for ${name} on ${date} (required):`);
+  if(reason==null) return; const rs=reason.trim(); if(!rs){ toast('A reason is required'); return; }
+  // guard: don't duplicate
+  if(state.punches.some(p=>p.name===name && p.work_date===date && p.kind===kind)){ toast('Already exists'); return; }
+  const iso=new Date(`${date}T${t}:00`).toISOString();
+  const { error } = await db.from('punches').insert({ name, kind, work_date:date, punched_at:iso, edit_note:rs, edited_by:state.user, edited_at:new Date().toISOString() });
+  if(error){ console.error(error); toast('Only admins · Solo administradores'); return; }
+  await logAudit('punchedit', `${name} · ${date} · ${PK[kind]?PK[kind].en:kind} ADDED ${fmtT(iso)} · ${rs}`);
+  await loadAudit(); toast('Punch added<span class="b-es">Fichaje agregado</span>'); await loadPunches();
+}
 async function savePunchEdit(){
   const p=state.punchEdit; if(!p) return;
   const timeEl=document.getElementById('peTime'), noteEl=document.getElementById('peNote');
@@ -1380,10 +1394,10 @@ function punchDayModal(){
   const {name,date}=pd;
   const dp=state.punches.filter(p=>p.name===name && p.work_date===date);
   const rowFor=k=>{ const r=dp.find(x=>x.kind===k); const pk=PK[k];
-    if(!r) return `<div class="drow"><span class="k">${pk.en}</span><span class="v" style="color:var(--faint)">— missing</span></div>`;
+    if(!r) return `<div class="drow"><span class="k">${pk.en}</span><span class="v" style="display:flex;align-items:center;gap:6px"><input type="time" id="mp_${k}" style="width:120px;min-height:38px;padding:6px 8px"><button class="ghost" style="padding:5px 10px;font-size:12px" onclick="addMissingPunch('${jsq(name)}','${date}','${k}')">Add</button></span></div>`;
     const loc = r.distance_m!=null ? `<span class="locbadge ${punchOffsite(r)?'loc-off':'loc-on'}">${punchOffsite(r)?'Off':'On'}-site ${r.distance_m}m</span>` : (r.lat==null?'<span class="locbadge loc-no">No loc</span>':'');
     const mapl=r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:'';
-    return `<div class="drow"><span class="k">${pk.en}</span><span class="v">${fmtT(r.punched_at)} ${loc}${mapl} <button class="ghost" style="padding:3px 8px;font-size:11px" onclick="state.punchDay=null; openPunchEdit('${r.id}')">edit</button>${r.edited_by?' <span style="color:var(--half)" title="edited">✎</span>':''}</span></div>`;
+    return `<div class="drow"><span class="k">${pk.en}</span><span class="v">${fmtT(r.punched_at)} ${loc}${mapl} <button class="ghost" style="padding:3px 8px;font-size:11px" onclick="state.punchDay=null; openPunchEdit('${r.id}')">edit</button>${r.edited_by?' <span style="color:var(--half)" title="edited/added">✎</span>':''}</span></div>`;
   };
   const h=workHours(dp);
   const edits=dp.filter(p=>p.edited_by && p.edit_note);
