@@ -299,7 +299,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null,
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null, punchRange:{from:'',to:''},
   filter:{ month:'all', person:'all', status:'all', detail:'all' } };
 let channel=null, _names=[];
 
@@ -1416,12 +1416,43 @@ function punchDayModal(){
     <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closePunchDay()">Close</button></div>
   </div></div>`;
 }
+function leaveForDay(name, ds){
+  const dt=new Date(ds+'T00:00:00'); const wd=dt.getDay();
+  return state.requests.filter(r=> r.name===name && r.status==='approved' && (r.cat==='pto'||r.cat==='sick'||r.cat==='unpaid') && (
+    r.dur==='full' ? (ds>=r.start && ds<=(r.end||r.start) && wd!==0 && wd!==6) : (ds===r.start)
+  ));
+}
+function leaveHoursOnDate(name, ds, paidOnly){
+  let h=0;
+  for(const r of leaveForDay(name,ds)){ if(paidOnly && r.cat==='unpaid') continue; h += r.dur==='full'?hpd():(r.dur==='half'?hpd()/2:(+r.hours||0)); }
+  return h;
+}
+function setPunchRange(from,to){ state.punchRange={from,to}; render(); }
+function punchRangeLast2(){ const t=new Date(); const f=new Date(); f.setDate(f.getDate()-13); const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; state.punchRange={from:ymd(f),to:ymd(t)}; render(); }
 function viewPunch(){
   const names=canPunchNames();
-  // collect name+date pairs
-  const pairs=[]; const seen=new Set();
-  state.punches.forEach(p=>{ if(!names.includes(p.name)) return; const key=p.name+'|'+p.work_date; if(!seen.has(key)){ seen.add(key); pairs.push({name:p.name, date:p.work_date}); } });
-  pairs.sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+  const rng=state.punchRange, hasR=!!(rng.from&&rng.to);
+  const lo=hasR?(rng.from<rng.to?rng.from:rng.to):null, hi=hasR?(rng.from<rng.to?rng.to:rng.from):null;
+  const inRange=ds=> !hasR || (ds>=lo && ds<=hi);
+  const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  // build day rows: punch days (+ leave-only days when a range is set)
+  const pairSet=new Map();
+  state.punches.forEach(p=>{ if(!names.includes(p.name)) return; if(!inRange(p.work_date)) return; pairSet.set(p.name+'|'+p.work_date,{name:p.name,date:p.work_date}); });
+  if(hasR){
+    state.requests.filter(r=>r.status==='approved' && names.includes(r.name) && (r.cat==='pto'||r.cat==='sick'||r.cat==='unpaid')).forEach(r=>{
+      if(r.dur!=='full'){ if(inRange(r.start)) pairSet.set(r.name+'|'+r.start,{name:r.name,date:r.start}); return; }
+      const s=r.start<lo?lo:r.start, e=(r.end||r.start)>hi?hi:(r.end||r.start);
+      for(let d=new Date(s+'T00:00:00'), b=new Date(e+'T00:00:00'); d<=b; d.setDate(d.getDate()+1)){ const wd=d.getDay(); if(wd===0||wd===6) continue; pairSet.set(r.name+'|'+ymd(d),{name:r.name,date:ymd(d)}); }
+    });
+  }
+  const pairs=[...pairSet.values()].sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
+  // payroll totals over shown pairs
+  const paySum = names.map(nm=>{
+    const dates=pairs.filter(p=>p.name===nm).map(p=>p.date);
+    let worked=0, paid=0, unpaid=0;
+    dates.forEach(ds=>{ worked+=workHours(state.punches.filter(p=>p.name===nm&&p.work_date===ds)); paid+=leaveHoursOnDate(nm,ds,true); unpaid+=(leaveHoursOnDate(nm,ds,false)-leaveHoursOnDate(nm,ds,true)); });
+    return {nm, worked, paid, total:worked+paid, unpaid};
+  }).filter(x=>x.worked||x.paid||x.unpaid);
   const rows=pairs.map(({name,date})=>{
     const s=punchDaySummary(name,date);
     const cell=k=>{ const r=s.get(k); if(!r) return '<span style="color:var(--faint)">—</span>';
@@ -1434,10 +1465,13 @@ function viewPunch(){
     const loc = siteTag + (s.anyNo ? `<span class="locbadge loc-no">Some no-loc</span>` : (s.maxD==null?`<span class="locbadge loc-no">—</span>`:(s.anyOff?`<span class="locbadge loc-off">Off-site ${s.maxD}m</span>`:`<span class="locbadge loc-on">On-site ≤${s.maxD}m</span>`)));
     const dn=notesFor(name,date);
     const notesCell = `${dn.length?dn.map(n=>`<div style="font-size:11px;color:var(--soft)">💬 ${esc(n.note)}</div>`).join(''):''}<button class="ghost" style="padding:4px 8px;font-size:11px;margin-top:${dn.length?'4px':'0'}" onclick="addPunchNote('${jsq(name)}','${date}')">+ note</button>`;
+    const lv=leaveForDay(name,date);
+    const leaveCell = lv.length? lv.map(r=>{ const cb=CAT[r.cat]||CAT.pto; const amt=r.dur==='full'?'full':(r.dur==='half'?'½':`${fmtH(+r.hours||0)}h`); return `<span class="badge ${cb.cls}" style="cursor:pointer" onclick="openReqDetail('${r.id}')" title="View request">${cb.label} ${amt}</span>`; }).join(' ') : '<span style="color:var(--faint)">—</span>';
+    const paidH = (s.hrs||0) + leaveHoursOnDate(name,date,true);
     return `<tr>
       <td class="name">${esc(name)}</td><td style="white-space:nowrap">${fmtDate(date)}</td>
       <td>${cell('morning_in')}</td><td>${cell('lunch_out')}</td><td>${cell('lunch_in')}</td><td>${cell('off_out')}</td>
-      <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${loc}</td><td style="min-width:120px">${notesCell}</td>
+      <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${leaveCell}</td><td><b>${paidH?paidH.toFixed(2)+'h':'—'}</b></td><td>${loc}</td><td style="min-width:120px">${notesCell}</td>
     </tr>`;
   }).join('');
 
@@ -1492,7 +1526,22 @@ function viewPunch(){
     </div>
 
 
-    <div class="list-head"><div><h3>Punch records</h3><div class="count">${names.length} tracked · ${pairs.length} days</div></div>
+    <div class="card pad" style="margin-bottom:14px">
+      <div class="cal-range" style="margin:0;padding:0;border:none">
+        <span style="font-size:12.5px;color:var(--soft)">Pay period:</span>
+        <input type="date" value="${esc(rng.from||'')}" onchange="setPunchRange(this.value, state.punchRange.to||this.value)" style="max-width:160px">
+        <span style="color:var(--soft)">→</span>
+        <input type="date" value="${esc(rng.to||'')}" onchange="setPunchRange(state.punchRange.from||this.value, this.value)" style="max-width:160px">
+        <button class="ghost" onclick="punchRangeLast2()" style="padding:7px 11px;font-size:12px">Last 2 weeks</button>
+        ${hasR?`<button class="ghost" onclick="setPunchRange('','')" style="padding:7px 11px;font-size:12px">Clear</button>`:''}
+      </div>
+      ${paySum.length?`<div class="tblwrap" style="margin-top:12px"><table class="tbl">
+        <thead><tr><th>Employee</th><th>Worked</th><th>Paid leave (PTO/Sick)</th><th>Total paid</th><th>Unpaid</th></tr></thead>
+        <tbody>${paySum.map(x=>`<tr><td class="name">${esc(x.nm)}</td><td>${x.worked.toFixed(2)}h</td><td>${x.paid.toFixed(2)}h</td><td><b>${x.total.toFixed(2)}h</b></td><td>${x.unpaid?x.unpaid.toFixed(2)+'h':'—'}</td></tr>`).join('')}</tbody>
+      </table></div><div style="font-size:11.5px;color:var(--faint);margin-top:6px">Total paid = worked punch hours + approved PTO/Sick. Unpaid is shown separately and not included.</div>`:`<div style="font-size:12.5px;color:var(--soft);margin-top:10px">Pick a pay period (or Last 2 weeks) to see the payroll summary.</div>`}
+    </div>
+
+    <div class="list-head"><div><h3>Punch records${hasR?` · ${fmtDate(lo)} → ${fmtDate(hi)}`:''}</h3><div class="count">${names.length} tracked · ${pairs.length} days</div></div>
       <div class="headbtns">
         <button class="csv" onclick="exportPunchesCSV()">${IC.csv}<span class="txt">CSV (Excel)</span></button>
         <button class="export" onclick="exportPunchesXLSX()">${IC.excel}<span class="txt">Excel .xlsx</span></button>
@@ -1503,29 +1552,49 @@ function viewPunch(){
       <div class="stat click" onclick="openPunchAlert('comment')"><div class="n" style="color:var(--early)">${A.comment.length}</div><div class="l">With comment</div></div>
     </div>`; })()}
     <div class="card"><div class="tblwrap"><table class="tbl">
-      <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Hours</th><th>Location</th><th>Comments</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="9" style="text-align:center;color:var(--soft);padding:30px">No punches yet</td></tr>`}</tbody>
+      <thead><tr><th>Name</th><th>Date</th><th>Morning In</th><th>Lunch Out</th><th>Lunch In</th><th>Off Out</th><th>Worked</th><th>Leave</th><th>Paid hrs</th><th>Location</th><th>Comments</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="11" style="text-align:center;color:var(--soft);padding:30px">No records in this range</td></tr>`}</tbody>
     </table></div></div>
     <div class="note">${IC.info}<div>Tap a time to correct a punch — a reason is required and is logged. Punches are never deleted. A punch is blocked if the person is outside their allowed site(s) or has no location. Hours = (Lunch Out − Morning In) + (Off Out − Lunch In).</div></div>
   `;
 }
-function punchExportRows(){
+function _punchPairs(){
   const names=canPunchNames();
-  return state.punches.filter(p=>names.includes(p.name)).slice().sort((a,b)=> new Date(a.punched_at)-new Date(b.punched_at)).map(p=>({
-    'Name':p.name,'Date':p.work_date,'Punch':PK[p.kind]?PK[p.kind].en:p.kind,'Time':fmtT(p.punched_at),
-    'Latitude':p.lat!=null?p.lat:'','Longitude':p.lng!=null?p.lng:'','Accuracy (m)':p.accuracy!=null?p.accuracy:'',
-    'Site':p.location_name||'','Distance (m)':p.distance_m!=null?p.distance_m:'','On-site':p.lat==null?'':(p.distance_m!=null?'Yes':'No'),
-    'Edited by':p.edited_by||'','Edit reason':p.edit_note||'',
-    'Map':(p.lat!=null?`https://maps.google.com/?q=${p.lat},${p.lng}`:'')
-  }));
+  const rng=state.punchRange, hasR=!!(rng.from&&rng.to);
+  const lo=hasR?(rng.from<rng.to?rng.from:rng.to):null, hi=hasR?(rng.from<rng.to?rng.to:rng.from):null;
+  const inRange=ds=>!hasR||(ds>=lo&&ds<=hi);
+  const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const set=new Map();
+  state.punches.forEach(p=>{ if(!names.includes(p.name))return; if(!inRange(p.work_date))return; set.set(p.name+'|'+p.work_date,{name:p.name,date:p.work_date}); });
+  if(hasR){ state.requests.filter(r=>r.status==='approved'&&names.includes(r.name)&&(r.cat==='pto'||r.cat==='sick'||r.cat==='unpaid')).forEach(r=>{ if(r.dur!=='full'){ if(inRange(r.start)) set.set(r.name+'|'+r.start,{name:r.name,date:r.start}); return;} const s=r.start<lo?lo:r.start, e=(r.end||r.start)>hi?hi:(r.end||r.start); for(let d=new Date(s+'T00:00:00'),b=new Date(e+'T00:00:00');d<=b;d.setDate(d.getDate()+1)){const wd=d.getDay(); if(wd===0||wd===6)continue; set.set(r.name+'|'+ymd(d),{name:r.name,date:ymd(d)});} }); }
+  return {names, hasR, lo, hi, pairs:[...set.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.name.localeCompare(b.name))};
 }
-function exportPunchesCSV(){ const rows=punchExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; } downloadCSV(`Punches_${today()}.csv`, toCSV(rows)); toast('CSV downloaded<span class="b-es">CSV descargado</span>'); }
+function punchExportRows(){
+  const {pairs}=_punchPairs();
+  return pairs.map(({name,date})=>{
+    const dp=state.punches.filter(p=>p.name===name&&p.work_date===date);
+    const t=k=>{const r=dp.find(x=>x.kind===k); return r?fmtT(r.punched_at):'';};
+    const worked=workHours(dp);
+    const lv=leaveForDay(name,date).map(r=>{const amt=r.dur==='full'?'full':(r.dur==='half'?'half':`${fmtH(+r.hours||0)}h`); return `${(CAT[r.cat]||CAT.pto).label} ${amt}`;}).join(', ');
+    const paid=worked+leaveHoursOnDate(name,date,true);
+    const site=[...new Set(dp.map(p=>p.location_name).filter(Boolean))].join(', ');
+    return {'Name':name,'Date':date,'Morning In':t('morning_in'),'Lunch Out':t('lunch_out'),'Lunch In':t('lunch_in'),'Off Out':t('off_out'),'Worked (h)':worked?+worked.toFixed(2):0,'Leave':lv,'Paid hours (h)':paid?+paid.toFixed(2):0,'Site':site};
+  });
+}
+function payrollRows(){
+  const {names,pairs}=_punchPairs();
+  return names.map(nm=>{ const dates=pairs.filter(p=>p.name===nm).map(p=>p.date); let w=0,p=0,u=0; dates.forEach(ds=>{w+=workHours(state.punches.filter(x=>x.name===nm&&x.work_date===ds)); p+=leaveHoursOnDate(nm,ds,true); u+=(leaveHoursOnDate(nm,ds,false)-leaveHoursOnDate(nm,ds,true));}); return {'Employee':nm,'Worked (h)':+w.toFixed(2),'Paid leave (h)':+p.toFixed(2),'Total paid (h)':+(w+p).toFixed(2),'Unpaid (h)':+u.toFixed(2)}; }).filter(x=>x['Worked (h)']||x['Paid leave (h)']||x['Unpaid (h)']);
+}
+function _rangeTag(){ const {hasR,lo,hi}=_punchPairs(); return hasR?`${lo}_to_${hi}`:today(); }
+function exportPunchesCSV(){ const rows=punchExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; } downloadCSV(`Punches_${_rangeTag()}.csv`, toCSV(rows)); toast('CSV downloaded<span class="b-es">CSV descargado</span>'); }
 function exportPunchesXLSX(){
   if(typeof XLSX==='undefined'){ toast('Excel module still loading'); return; }
   const rows=punchExportRows(); if(!rows.length){ toast('Nothing to export · Nada'); return; }
-  const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:12},{wch:13},{wch:11},{wch:12},{wch:12},{wch:11},{wch:20},{wch:8},{wch:34}];
-  XLSX.utils.book_append_sheet(wb,ws,'Punches'); XLSX.writeFile(wb,`Punches_${today()}.xlsx`);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(rows); ws['!cols']=[{wch:16},{wch:12},{wch:11},{wch:11},{wch:11},{wch:11},{wch:10},{wch:16},{wch:11},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,ws,'Punches');
+  const pr=payrollRows(); if(pr.length){ const ws2=XLSX.utils.json_to_sheet(pr); ws2['!cols']=[{wch:18},{wch:11},{wch:14},{wch:13},{wch:11}]; XLSX.utils.book_append_sheet(wb,ws2,'Payroll'); }
+  XLSX.writeFile(wb,`Punches_${_rangeTag()}.xlsx`);
   toast('Excel downloaded<span class="b-es">Excel descargado</span>');
 }
 
