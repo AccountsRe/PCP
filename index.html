@@ -229,6 +229,10 @@
   .dbadges{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px}
 
   .req{display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--line-2)}
+  .req-cancelled{background:var(--line-2); opacity:.6}
+  .req-cancelled .req-name,.req-cancelled .req-dates{text-decoration:line-through; text-decoration-color:var(--soft)}
+  .req-rejected{opacity:.7}
+  .req-rejected .req-name{text-decoration:line-through; text-decoration-color:var(--warnc)}
   .req:last-child{border-bottom:none}
   .badges{display:flex; flex-direction:column; gap:4px; flex:none; align-items:flex-start}
   .badge{font-size:11px; font-weight:700; padding:5px 9px; border-radius:11px; white-space:nowrap; text-align:center; line-height:1.15; min-width:62px}
@@ -1705,7 +1709,7 @@ function reqRow(r,isAdmin){
     const pr=remainingProjected(r.name,'pto'), sr=remainingProjected(r.name,'sick');
     balChip = `<span class="req-days" style="color:var(--soft)"> · PTO ${fmtH(pr)}h · Sick ${fmtH(sr)}h left</span>`;
   }
-  return `<div class="req" onclick="openReqDetail('${r.id}')" style="cursor:pointer">
+  return `<div class="req${r.status==='cancelled'?' req-cancelled':''}${r.status==='rejected'?' req-rejected':''}" onclick="openReqDetail('${r.id}')" style="cursor:pointer">
     <div class="badges">
       <span class="badge ${catB.cls}">${catB.label}<span class="es">${catB.es}</span></span>
       ${showDet?`<span class="badge ${detB.cls}">${detB.label}<span class="es">${detB.es}</span></span>`:''}
