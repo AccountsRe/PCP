@@ -303,7 +303,7 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPQAAAB4CAYAAADF
 
 let state={ screen:'loading', tab:'employee', user:null, role:null, view:'requests',
   requests:[], employees:{}, codes:{}, punches:[], punchNotes:[], locations:[], empLocs:{}, settings:{pto_allowance:15,sick_allowance:10,hours_per_day:8}, audit:[],
-  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null, punchRange:{from:'',to:''}, punchName:null,
+  cat:'pto', dur:'full', detail:'pto', busy:false, editing:null, detailReq:null, punchEdit:null, quick:null, formOpen:false, allowEdits:{}, dates:{start:'',end:''}, rTime:'08:00', rHours:'', rReason:'', rName:'', mgr:false, calMonth:'', calDay:null, calRange:{from:'',to:''}, sitesOpen:false, whoOpen:false, empDay:null, punchAlert:null, punchDay:null, punchRange:{from:'',to:''}, punchName:null,
   filter:{ month:'all', person:'all', status:'all', detail:'all', from:'', to:'' } };
 let channel=null, _names=[];
 
@@ -357,7 +357,7 @@ function setView(v){
   state.view=v; render();
 }
 function setFilter(k,v){ state.filter[k]=v; render(); }
-function clearForm(){ state.dates={start:'',end:''}; state.rTime='08:00'; state.rHours=''; state.rReason=''; state.mgr=false; }
+function clearForm(){ state.dates={start:'',end:''}; state.rTime='08:00'; state.rHours=''; state.rReason=''; state.rName=''; state.mgr=false; }
 function fmtNum(n){ n=+n; return Number.isInteger(n)?n:n.toFixed(2).replace(/0$/,''); }
 function fmtH(n){ return Math.round(+n||0); }
 function dget(k){ return (state.dates && state.dates[k]) ? state.dates[k] : today(); }
@@ -482,7 +482,7 @@ function stopIdleTimer(){ clearTimeout(_idleT); clearTimeout(_idleWarnT); }
 /* ============ actions ============ */
 async function submitReq(){
   if(state.busy) return;
-  const name=val('rName').trim(), detail=state.detail, dur=state.dur, start=val('rStart');
+  const name=(state.role==='admin'?(state.rName||''):(state.user||'')).trim(), detail=state.detail, dur=state.dur, start=val('rStart');
   let cat=state.cat;
   if(!name) return toast('Enter a name<span class="b-es">Ingresa un nombre</span>');
   if(!start) return toast('Pick a start date<span class="b-es">Elige la fecha de inicio</span>');
@@ -1151,8 +1151,7 @@ function viewRequests(isAdmin){
   const c=state.cat, d=state.dur, dt=state.detail;
   let unpaidWarn='';
   if(c==='unpaid'){
-    const el=document.getElementById('rName');
-    const nm=((el?el.value:'')||state.user||'').trim();
+    const nm=((state.role==='admin'?state.rName:'')||state.user||'').trim();
     if(nm){
       const pL=allowanceFor(nm,'pto')-usageFor(nm,'pto','approved');
       const sL=allowanceFor(nm,'sick')-usageFor(nm,'sick','approved');
@@ -1163,7 +1162,7 @@ function viewRequests(isAdmin){
     }
   }
   const nameField = state.role==='admin'
-    ? `<label>Employee${es('Empleado')}</label><select id="rName" onchange="if(state.cat==='unpaid')render()"><option value="">${bl('— Select —','— Seleccionar —')}</option>${rosterNames().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>`
+    ? `<label>Employee${es('Empleado')}</label><select id="rName" onchange="state.rName=this.value; render()"><option value="">${bl('— Select —','— Seleccionar —')}</option>${rosterNames().map(n=>`<option value="${esc(n)}" ${state.rName===n?'selected':''}>${esc(n)}</option>`).join('')}</select>`
     : `<label>Name${es('Nombre')}</label><input id="rName" value="${esc(state.user||'')}" readonly style="background:var(--line-2);color:var(--soft);cursor:not-allowed">`;
 
   const balHtml = state.role==='employee' ? balanceCard(state.user) : '';
