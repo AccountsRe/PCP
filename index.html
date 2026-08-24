@@ -163,6 +163,7 @@
   .cal-chip{font-size:10px; font-weight:700; border-radius:5px; padding:1px 5px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5}
   .cal-pto{background:var(--pto-bg); color:var(--pto)}
   .cal-sick{background:var(--sick-bg); color:var(--sick)}
+  .cal-unpaid{background:var(--line-2); color:var(--soft)}
   .cal-more{font-size:10px; color:var(--soft); font-weight:700}
   .cal-range{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--line-2)}
   @media(max-width:600px){ .cal-cell{min-height:52px} .cal-chip{font-size:9px; padding:1px 3px} .cal-d{font-size:11px} }
@@ -1638,7 +1639,7 @@ function exportPunchesXLSX(){
 function calCur(){ return state.calMonth || today().slice(0,7); }
 function calShift(delta){ const [y,m]=calCur().split('-').map(Number); const d=new Date(y, m-1+delta, 1); state.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; render(); }
 function calToday(){ state.calMonth=today().slice(0,7); render(); }
-function reqCoversDate(r, ds){ if(r.status!=='approved') return false; if(r.cat!=='pto'&&r.cat!=='sick') return false; if(r.dur==='full'){ const dt=new Date(ds+'T00:00:00'); const wd=dt.getDay(); if(wd===0||wd===6) return false; return ds>=r.start && ds<=(r.end||r.start); } return ds===r.start; }
+function reqCoversDate(r, ds){ if(r.status!=='approved') return false; if(r.cat!=='pto'&&r.cat!=='sick'&&r.cat!=='unpaid') return false; if(r.dur==='full'){ const dt=new Date(ds+'T00:00:00'); const wd=dt.getDay(); if(wd===0||wd===6) return false; return ds>=r.start && ds<=(r.end||r.start); } return ds===r.start; }
 function requestsOnDate(ds){ return state.requests.filter(r=>reqCoversDate(r,ds)); }
 function setCalDay(ds){ state.calDay=ds; render(); }
 function closeCalDay(){ state.calDay=null; render(); }
@@ -1663,7 +1664,7 @@ function calendarCard(){
     const ds=`${ym}-${String(d).padStart(2,'0')}`;
     const list=requestsOnDate(ds);
     const isToday = ds===today();
-    const chips = list.slice(0,3).map(r=>{ const isP=r.cat==='pto'; return `<div class="cal-chip ${isP?'cal-pto':'cal-sick'}" title="${esc(r.name)} · ${isP?'PTO':'Sick'}">${esc(r.name.split(' ')[0])}</div>`; }).join('');
+    const chips = list.slice(0,3).map(r=>{ const cls=r.cat==='pto'?'cal-pto':(r.cat==='sick'?'cal-sick':'cal-unpaid'); const lbl=r.cat==='pto'?'PTO':(r.cat==='sick'?'Sick':'Unpaid'); return `<div class="cal-chip ${cls}" title="${esc(r.name)} · ${lbl}">${esc(r.name.split(' ')[0])}</div>`; }).join('');
     const more = list.length>3?`<div class="cal-more">+${list.length-3}</div>`:'';
     cells+=`<div class="cal-cell${isToday?' cal-today':''}${list.length?' cal-has':''}" onclick="setCalDay('${ds}')"><div class="cal-d">${d}</div>${chips}${more}</div>`;
   }
@@ -1678,7 +1679,7 @@ function calendarCard(){
         <button class="ghost" onclick="calToday()" style="padding:6px 11px;font-size:12px">Today</button>
       </div>
     </div>
-    <div class="cal-legend"><span class="cal-chip cal-pto" style="display:inline-block">PTO</span> <span class="cal-chip cal-sick" style="display:inline-block">Sick</span> <span style="color:var(--soft);font-size:12px">· tap a day for details</span></div>
+    <div class="cal-legend"><span class="cal-chip cal-pto" style="display:inline-block">PTO</span> <span class="cal-chip cal-sick" style="display:inline-block">Sick</span> <span class="cal-chip cal-unpaid" style="display:inline-block">Unpaid</span> <span style="color:var(--soft);font-size:12px">· tap a day for details</span></div>
     <div class="cal-grid">${wdh}${cells}</div>
     <div class="cal-range">
       <span style="font-size:12.5px;color:var(--soft)">Date range:</span>
@@ -1693,8 +1694,8 @@ function calendarCard(){
 function calRangeList(){
   const f=state.calRange.from, t=state.calRange.to; if(!f||!t) return '';
   const lo=f<t?f:t, hi=f<t?t:f;
-  const list=state.requests.filter(r=>(r.cat==='pto'||r.cat==='sick')&&r.status==='approved'&&(r.start||'')<=hi&&((r.end||r.start)||'')>=lo).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
-  if(!list.length) return `<div style="color:var(--soft);font-size:13px;margin-top:12px">No approved PTO/Sick between ${fmtDate(lo)} and ${fmtDate(hi)}.</div>`;
+  const list=state.requests.filter(r=>(r.cat==='pto'||r.cat==='sick'||r.cat==='unpaid')&&r.status==='approved'&&(r.start||'')<=hi&&((r.end||r.start)||'')>=lo).sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  if(!list.length) return `<div style="color:var(--soft);font-size:13px;margin-top:12px">No approved time off between ${fmtDate(lo)} and ${fmtDate(hi)}.</div>`;
   return `<div style="margin-top:14px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">${fmtDate(lo)} → ${fmtDate(hi)} · ${list.length} approved</div>
     ${list.map(r=>{ const cb=CAT[r.cat]||CAT.pto; const dl=r.start===(r.end||r.start)?fmtDate(r.start):`${fmtDate(r.start)} → ${fmtDate(r.end)}`; return `<div class="drow" style="cursor:pointer" onclick="openReqDetail('${r.id}')"><span class="k">${esc(r.name)} <span class="badge ${cb.cls}" style="margin-left:4px">${cb.label}</span></span><span class="v">${dl} · ${fmtH(reqHours(r))}h ›</span></div>`; }).join('')}</div>`;
 }
