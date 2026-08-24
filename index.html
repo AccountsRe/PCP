@@ -580,13 +580,25 @@ function setEditDetail(d){ captureEdit(); state.editing.detail=d; if(d==='early'
 function setEditDur(d){ captureEdit(); state.editing.dur=d; render(); }
 async function saveEdit(){
   captureEdit(); const e=state.editing; if(!e) return;
-  const cat=e.cat||'pto';
+  let cat=e.cat||'pto';
   if(!e.name || !e.name.trim()) return toast('Enter a name · Ingresa un nombre');
   if(!e.start) return toast('Pick a start date · Elige la fecha');
   let end=e.start, days=0, startTime=null, hours=null;
   if(e.dur==='full'){ end=e.end||e.start; days=businessDays(e.start,end); if(days<=0) return toast('That range is all weekend'); }
   else if(e.dur==='half'){ startTime=e.startTime; if(!startTime) return toast('Pick a start time · Elige la hora'); days=0.5; }
   else { startTime=e.startTime; hours=parseInt(e.hours,10); if(!startTime) return toast('Pick a start time · Elige la hora'); if(!hours||hours<=0) return toast('Enter hours · Ingresa las horas'); days=Math.round((hours/hpd())*100)/100; }
+  // Balance check (exclude this request itself) — offer Unpaid if short
+  if(cat==='pto' || cat==='sick'){
+    const reqH=Math.round(days*hpd());
+    const others=state.requests.filter(r=> r.name===e.name.trim() && r.cat===cat && (r.status==='approved'||r.status==='pending') && r.id!==e.id).reduce((s,r)=>s+reqHours(r),0);
+    const remaining=allowanceFor(e.name.trim(),cat)-others;
+    if(reqH>remaining){
+      const kindL=cat==='pto'?'PTO':'Sick';
+      const ok=confirm(`Not enough ${kindL} balance — ${fmtH(remaining)}h left, ${reqH}h in this request.\n\nSave it as UNPAID instead?\n\nSaldo insuficiente de ${kindL}. ¿Guardar como SIN GOCE (Unpaid)?`);
+      if(!ok) return;
+      cat='unpaid';
+    }
+  }
   const payload={ name:e.name.trim(), type:cat, detail:e.detail, duration:e.dur, start_date:e.start, end_date:end, start_time:startTime, hours, days, reason:(e.reason&&e.reason.trim())||null, edited_at:new Date().toISOString(), edited_by:state.user };
   const { error } = await db.from('requests').update(payload).eq('id', e.id);
   if(error){ console.error(error); toast('Only admins can edit · Solo administradores'); return; }
