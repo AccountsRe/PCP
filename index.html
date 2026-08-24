@@ -482,7 +482,8 @@ function stopIdleTimer(){ clearTimeout(_idleT); clearTimeout(_idleWarnT); }
 /* ============ actions ============ */
 async function submitReq(){
   if(state.busy) return;
-  const name=val('rName').trim(), cat=state.cat, detail=state.detail, dur=state.dur, start=val('rStart');
+  const name=val('rName').trim(), detail=state.detail, dur=state.dur, start=val('rStart');
+  let cat=state.cat;
   if(!name) return toast('Enter a name<span class="b-es">Ingresa un nombre</span>');
   if(!start) return toast('Pick a start date<span class="b-es">Elige la fecha de inicio</span>');
   if(start < `${curYear()}-01-01`) return toast('Date must be within this year<span class="b-es">La fecha debe ser de este año</span>');
@@ -503,17 +504,20 @@ async function submitReq(){
   // Reason is required
   const reason=(state.rReason||'').trim();
   if(!reason) return toast('Reason is required<span class="b-es">El motivo es obligatorio</span>');
-  // Balance check for PTO/Sick (Unpaid draws from nothing)
+  // Balance check for PTO/Sick — if short, offer to submit as Unpaid
+  let converted=false;
   if(cat==='pto' || cat==='sick'){
     const reqH = Math.round(days*hpd());
     const remaining = allowanceFor(name,cat) - usageFor(name,cat,'approved') - usageFor(name,cat,'pending');
     if(reqH > remaining){
       const kindL = cat==='pto'?'PTO':'Sick';
-      toast(`Not enough ${kindL} balance — ${fmtH(remaining)}h left, ${reqH}h requested<span class="b-es">Saldo insuficiente de ${kindL} — quedan ${fmtH(remaining)}h, solicitas ${reqH}h</span>`);
-      return;
+      const ok = confirm(`Not enough ${kindL} balance — ${fmtH(remaining)}h left, ${reqH}h requested.\n\nSubmit this as UNPAID instead?\n\n`+
+        `Saldo insuficiente de ${kindL} — quedan ${fmtH(remaining)}h, solicitas ${reqH}h.\n¿Enviar como SIN GOCE (Unpaid)?`);
+      if(!ok) return;
+      cat='unpaid'; converted=true;
     }
   }
-  if(cat==='unpaid'){
+  if(cat==='unpaid' && !converted){
     const ptoLeft=allowanceFor(name,'pto')-usageFor(name,'pto','approved');
     const sickLeft=allowanceFor(name,'sick')-usageFor(name,'sick','approved');
     if(ptoLeft>0 || sickLeft>0){
