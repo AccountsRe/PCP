@@ -1394,13 +1394,23 @@ function last14PunchPairs(){
   state.punches.forEach(p=>{ if(!names.includes(p.name)) return; if(p.work_date<cutStr) return; const k=p.name+'|'+p.work_date; if(!seen.has(k)){ seen.add(k); pairs.push({name:p.name,date:p.work_date}); } });
   return pairs.sort((a,b)=> b.date.localeCompare(a.date) || a.name.localeCompare(b.name));
 }
+function alertPairs(){
+  const rng=state.punchRange, hasR=!!(rng.from&&rng.to);
+  if(hasR){ return computePunchRows().pairs; }
+  return last14PunchPairs();
+}
+function alertPeriodLabel(){
+  const rng=state.punchRange; if(rng.from&&rng.to){ const lo=rng.from<rng.to?rng.from:rng.to, hi=rng.from<rng.to?rng.to:rng.from; return `${fmtDate(lo)} → ${fmtDate(hi)}`; }
+  return 'last 2 weeks';
+}
 function punchAlerts(){
   const offsite=[], missing=[], comment=[];
-  for(const pr of last14PunchPairs()){
+  for(const pr of alertPairs()){
     const dp=state.punches.filter(p=>p.name===pr.name && p.work_date===pr.date);
     if(dp.some(punchOffsite)) offsite.push(pr);
     const kinds=new Set(dp.map(p=>p.kind));
-    if(pr.date<today() && kinds.size<4) missing.push(pr);
+    const onLeave=leaveForDay(pr.name,pr.date).length>0;
+    if(pr.date<today() && kinds.size<4 && !onLeave) missing.push(pr);
     if(notesFor(pr.name,pr.date).length>0) comment.push(pr);
   }
   return {offsite, missing, comment};
@@ -1420,9 +1430,9 @@ function punchAlertModal(){
     else if(t==='missing'){ tag=`<span class="locbadge loc-no">${new Set(dp.map(p=>p.kind)).size}/4 punches</span>`; }
     else { const n=notesFor(pr.name,pr.date)[0]; tag=`<span style="color:var(--soft);font-size:12px">💬 ${esc((n&&n.note||'').slice(0,28))}${n&&n.note&&n.note.length>28?'…':''}</span>`; }
     return `<div class="drow" style="cursor:pointer" onclick="openPunchDay('${jsq(pr.name)}','${pr.date}')"><span class="k">${esc(pr.name)}<br><span style="font-weight:400;color:var(--soft);font-size:12px">${fmtDate(pr.date)}</span></span><span class="v">${tag} ›</span></div>`;
-  }).join('') : `<div style="color:var(--soft);padding:12px 0">Nothing here in the last 2 weeks.</div>`;
+  }).join('') : `<div style="color:var(--soft);padding:12px 0">Nothing here in this period.</div>`;
   return `<div class="overlay" onclick="if(event.target===this)closePunchAlert()"><div class="modal">
-    <h3>${IC.info} ${titles[t]} · last 2 weeks</h3>
+    <h3>${IC.info} ${titles[t]} · ${alertPeriodLabel()}</h3>
     <div style="margin-top:10px">${rows}</div>
     <div class="modal-actions"><button class="cancel" style="flex:1" onclick="closePunchAlert()">Close</button></div>
   </div></div>`;
@@ -1499,7 +1509,7 @@ function viewPunch(){
   }).filter(x=>x.worked||x.paid||x.unpaid);
   const rows=(state.punchName?pairs.filter(p=>p.name===state.punchName):pairs).map(({name,date})=>{
     const s=punchDaySummary(name,date);
-    const cell=k=>{ const r=s.get(k); if(!r) return '<span style="color:var(--faint)">—</span>';
+    const cell=k=>{ const r=s.get(k); if(!r) return `<button class="ghost" style="padding:4px 8px;font-size:11px;color:var(--soft)" title="Add this punch" onclick="openPunchDay('${jsq(name)}','${date}')">+ add</button>`;
       const mapl=r.lat!=null?` <a class="maplink" href="https://maps.google.com/?q=${r.lat},${r.lng}" target="_blank" style="color:var(--early)">📍</a>`:'';
       const ed=r.edited_by?' <span title="edited" style="color:var(--half)">✎</span>':'';
       return `<button class="ghost" style="padding:5px 8px;font-size:12px" title="Edit (reason required)" onclick="openPunchEdit('${r.id}')">${fmtT(r.punched_at)}</button>${mapl}${ed}`; };
@@ -1513,7 +1523,7 @@ function viewPunch(){
     const leaveCell = lv.length? lv.map(r=>{ const cb=CAT[r.cat]||CAT.pto; const amt=r.dur==='full'?'full':(r.dur==='half'?'½':`${fmtH(+r.hours||0)}h`); return `<span class="badge ${cb.cls}" style="cursor:pointer" onclick="openReqDetail('${r.id}')" title="View request">${cb.label} ${amt}</span>`; }).join(' ') : '<span style="color:var(--faint)">—</span>';
     const paidH = (s.hrs||0) + leaveHoursOnDate(name,date,true);
     return `<tr>
-      <td class="name">${esc(name)}</td><td style="white-space:nowrap">${fmtDate(date)}</td>
+      <td class="name">${esc(name)}</td><td style="white-space:nowrap;cursor:pointer;color:var(--pto)" onclick="openPunchDay('${jsq(name)}','${date}')" title="Open day">${fmtDate(date)}</td>
       <td>${cell('morning_in')}</td><td>${cell('lunch_out')}</td><td>${cell('lunch_in')}</td><td>${cell('off_out')}</td>
       <td><b>${s.hrs?s.hrs.toFixed(2)+'h':'—'}</b></td><td>${leaveCell}</td><td><b>${paidH?paidH.toFixed(2)+'h':'—'}</b></td><td>${loc}</td><td style="min-width:120px">${notesCell}</td>
     </tr>`;
