@@ -1396,12 +1396,14 @@ function last14PunchPairs(){
 }
 function alertPairs(){
   const rng=state.punchRange, hasR=!!(rng.from&&rng.to);
-  if(hasR){ return computePunchRows().pairs; }
-  return last14PunchPairs();
+  let pairs = hasR ? computePunchRows().pairs : last14PunchPairs();
+  if(state.punchName) pairs = pairs.filter(p=>p.name===state.punchName);
+  return pairs;
 }
 function alertPeriodLabel(){
-  const rng=state.punchRange; if(rng.from&&rng.to){ const lo=rng.from<rng.to?rng.from:rng.to, hi=rng.from<rng.to?rng.to:rng.from; return `${fmtDate(lo)} → ${fmtDate(hi)}`; }
-  return 'last 2 weeks';
+  const rng=state.punchRange; let p='last 2 weeks';
+  if(rng.from&&rng.to){ const lo=rng.from<rng.to?rng.from:rng.to, hi=rng.from<rng.to?rng.to:rng.from; p=`${fmtDate(lo)} → ${fmtDate(hi)}`; }
+  return state.punchName ? `${esc(state.punchName)} · ${p}` : p;
 }
 function punchAlerts(){
   const offsite=[], missing=[], comment=[];
