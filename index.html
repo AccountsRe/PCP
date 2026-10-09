@@ -690,7 +690,13 @@ async function saveAllowances(){
     }
     if(touched){ const { error } = await db.from('employees').upsert(rec,{onConflict:'name'}); if(error){ console.error(error); toast('Could not save · No se pudo guardar'); return; } }
   }
-  for(const c of changes){ await logAudit('allowance', `${c.name}: ${c.kind.toUpperCase()} ${c.oldV==null?'default':c.oldV+'h'} → ${c.newV==null?'default':c.newV+'h'}`); }
+  let note='';
+  if(changes.length){
+    const r=prompt(`Reason / note for this allowance change (optional but recommended):\n\n`+changes.map(c=>`• ${c.name}: ${c.kind.toUpperCase()} ${c.oldV==null?'default':c.oldV+'h'} → ${c.newV==null?'default':c.newV+'h'}`).join('\n'));
+    if(r===null){ return; } // cancelled — keep edits, don't save
+    note=r.trim();
+  }
+  for(const c of changes){ await logAudit('allowance', `${c.name}: ${c.kind.toUpperCase()} ${c.oldV==null?'default':c.oldV+'h'} → ${c.newV==null?'default':c.newV+'h'}${note?` · ${note}`:''}`); }
   state.allowEdits={};
   await loadEmployees(); await loadAudit();
   toast(changes.length?`${changes.length} change(s) saved<span class="b-es">${changes.length} cambio(s) guardado(s)</span>`:'No changes'); render();
